@@ -667,3 +667,92 @@
   flex: 1;
   font-size: 12px;
 }
+
+/* -- SML viewer modal -- */
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.62);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.sml-modal {
+  width: 920px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--as-modal);
+  border: 1px solid var(--as-hairline);
+}
+
+.sml-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--as-hairline);
+}
+
+.sml-modal-body {
+  display: flex;
+  overflow: hidden;
+  flex: 1;
+}
+
+.sml-file-tabs {
+  flex: 0 0 220px;
+  overflow-y: auto;
+  border-right: 1px solid var(--as-hairline);
+}
+
+.sml-file-tab {
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--as-muted-56);
+  cursor: pointer;
+  word-break: break-all;
+}
+
+.sml-file-tab-active {
+  background: var(--as-field);
+  color: var(--as-ink-strong);
+}
+
+.sml-file-content {
+  flex: 1;
+  margin: 0;
+  padding: 16px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre;
+  color: var(--as-ink);
+}
+
+.validation-banner {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--as-hairline);
+}
+
+.validation-pass {
+  color: #3bd44a;
+}
+
+.validation-fail {
+  color: var(--as-join);
+}
+
+.validation-output {
+  max-height: 200px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--as-ink);
+  white-space: pre-wrap;
+  margin: 0;
+}

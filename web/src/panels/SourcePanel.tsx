@@ -59,7 +59,14 @@ export function SourcePanel() {
       <select
         className="source-select"
         value={sourceId ?? ''}
-        onChange={(e) => setSourceId(e.target.value || null)}
+        onChange={(e) => {
+          const id = e.target.value || null
+          const src = sources.find((s) => s.id === id)
+          setSourceId(
+            id,
+            src ? { dialect: src.dialect, connectionId: src.connectionId, database: src.database } : null,
+          )
+        }}
       >
         <option value="">Select a data source…</option>
         {sources.map((s) => (

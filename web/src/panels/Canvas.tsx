@@ -28,6 +28,7 @@ export function Canvas() {
   const removeNode = useModelStore((s) => s.removeNode)
   const addJoin = useModelStore((s) => s.addJoin)
   const removeJoin = useModelStore((s) => s.removeJoin)
+  const setJoinRolePlay = useModelStore((s) => s.setJoinRolePlay)
   const cfg = useModelStore((s) => s.cfg)
   const joined = joinedColumnKeys(useModelStore.getState())
 
@@ -143,19 +144,44 @@ export function Canvas() {
           const p2 = anchorFor(b, j.b.column, a.x < b.x ? 'l' : 'r')
           const dx = Math.max(50, Math.abs(p2.x - p1.x) / 2)
           const path = `M ${p1.x} ${p1.y} C ${p1.x + dx} ${p1.y}, ${p2.x - dx} ${p2.y}, ${p2.x} ${p2.y}`
+          const midX = (p1.x + p2.x) / 2
+          const midY = (p1.y + p2.y) / 2
           return (
-            <path
-              key={j.id}
-              d={path}
-              fill="none"
-              stroke={involvesFact ? 'var(--as-join)' : 'var(--as-muted-30)'}
-              strokeWidth={2.5}
-              style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
-              onClick={(e) => {
-                e.stopPropagation()
-                removeJoin(j.id)
-              }}
-            />
+            <g key={j.id}>
+              <path
+                d={path}
+                fill="none"
+                stroke={involvesFact ? 'var(--as-join)' : 'var(--as-muted-30)'}
+                strokeWidth={2.5}
+                style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  removeJoin(j.id)
+                }}
+                onDoubleClick={(e) => {
+                  e.stopPropagation()
+                  if (!involvesFact) return
+                  const next = window.prompt(
+                    'Role-play prefix for this join (e.g. "Order", "Ship") - leave blank to clear:',
+                    j.rolePlay ?? '',
+                  )
+                  if (next !== null) setJoinRolePlay(j.id, next.trim() || undefined)
+                }}
+              />
+              {j.rolePlay && (
+                <text
+                  x={midX}
+                  y={midY - 6}
+                  fill="var(--as-join)"
+                  fontSize={10}
+                  fontFamily="var(--font-mono)"
+                  textAnchor="middle"
+                  style={{ pointerEvents: 'none' }}
+                >
+                  {j.rolePlay}
+                </text>
+              )}
+            </g>
           )
         })}
         {drag?.kind === 'link' && linkTo && (

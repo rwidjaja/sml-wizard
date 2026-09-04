@@ -152,3 +152,6 @@ dmypy.json
 # Local secrets — AtScale/git credentials, never commit
 connections.yaml
 api/connections.yaml
+
+# Saved model state (local dev persistence, not shared)
+api/.data/

@@ -21,6 +21,7 @@ export function Inspector() {
   const select = useModelStore((s) => s.select)
   const setNodeRole = useModelStore((s) => s.setNodeRole)
   const setNodeField = useModelStore((s) => s.setNodeField)
+  const setNodeIsTime = useModelStore((s) => s.setNodeIsTime)
   const cfg = useModelStore((s) => s.cfg)
   const setColumnConfig = useModelStore((s) => s.setColumnConfig)
   const setColumnDimRole = useModelStore((s) => s.setColumnDimRole)
@@ -101,6 +102,17 @@ export function Inspector() {
                   Every level, alias and secondary attribute defined on this table is created under this hierarchy.
                 </span>
               </label>
+            </div>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={!!node.isTime}
+                onChange={(e) => setNodeIsTime(node.id, e.target.checked)}
+              />
+              Time dimension
+            </label>
+            <div className="field-note" style={{ marginBottom: 12 }}>
+              Marks this as SML <code>type: time</code> - each level is emitted with a <code>time_unit</code>.
             </div>
           </>
         )}
