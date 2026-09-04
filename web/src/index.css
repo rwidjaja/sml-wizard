@@ -1,0 +1,17 @@
+@import './styles/tokens.css';
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100vh;
+  margin: 0;
+  overflow-y: hidden;
+  min-width: var(--shell-min-w);
+  background: var(--as-canvas);
+  color: var(--as-ink);
+  font-family: var(--font-ui);
+}
