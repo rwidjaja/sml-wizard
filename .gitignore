@@ -145,3 +145,10 @@ dmypy.json
 # Profiling
 .prof
 .profile
+
+# Claude Code local session state
+.claude/
+
+# Local secrets — AtScale/git credentials, never commit
+connections.yaml
+api/connections.yaml
