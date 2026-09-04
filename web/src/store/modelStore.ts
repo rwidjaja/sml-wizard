@@ -28,6 +28,7 @@ export interface Node {
   role: Role
   dimName?: string
   hierName?: string
+  factName?: string
 }
 
 export interface Join {
@@ -86,15 +87,30 @@ export interface ModelState {
   moveNode: (id: string, x: number, y: number) => void
   removeNode: (id: string) => void
   setNodeRole: (id: string, role: Role) => void
-  setNodeField: (id: string, field: 'dimName' | 'hierName', value: string) => void
+  setNodeField: (id: string, field: 'dimName' | 'hierName' | 'factName', value: string) => void
+  setLevelOrder: (nodeId: string, key: ColumnKey, direction: 'up' | 'down') => void
   addJoin: (a: { node: string; column: string }, b: { node: string; column: string }) => void
   removeJoin: (id: string) => void
   select: (selection: Selection | null) => void
   setColumnConfig: (key: ColumnKey, patch: Partial<ColumnConfig>) => void
+  setColumnDimRole: (nodeId: string, key: ColumnKey, dimRole: DimRole) => void
   reset: () => void
 }
 
 const columnKey = (nodeId: string, column: string): ColumnKey => `${nodeId}::${column}`
+
+/** Auto-seeded names for a role, derived from the table name (strip dim_/fact_/fct_
+ *  prefix, title-case). Shared by addNode's initial role guess and setNodeRole's
+ *  manual role change so both paths seed dimName/hierName/factName consistently. */
+function seededNamesFor(table: string, role: Role) {
+  const stem = table.replace(/^(dim_|fact_|fct_)/i, '')
+  const titled = stem.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  return {
+    dimName: role === 'dimension' ? `${titled} Dimension` : undefined,
+    hierName: role === 'dimension' ? `${titled} Hierarchy` : undefined,
+    factName: role === 'fact' ? `${titled} Facts` : undefined,
+  }
+}
 
 let seq = 0
 
@@ -116,8 +132,9 @@ export const useModelStore = create<ModelState>((set, get) => ({
   addNode: (schema, table, x, y, columns = []) => {
     const id = `n${seq++}`
     const role: Role = /^(fct|fact)/i.test(table) ? 'fact' : /^dim/i.test(table) ? 'dimension' : null
+    const names = seededNamesFor(table, role)
     set((s) => ({
-      nodes: [...s.nodes, { id, schema, table, columns, x: Math.max(0, x), y: Math.max(0, y), role }],
+      nodes: [...s.nodes, { id, schema, table, columns, x: Math.max(0, x), y: Math.max(0, y), role, ...names }],
       selection: { node: id, column: null },
     }))
     return id
@@ -129,29 +146,61 @@ export const useModelStore = create<ModelState>((set, get) => ({
     })),
 
   removeNode: (id) =>
-    set((s) => ({
-      nodes: s.nodes.filter((n) => n.id !== id),
-      joins: s.joins.filter((j) => j.a.node !== id && j.b.node !== id),
-      selection: s.selection?.node === id ? null : s.selection,
-    })),
+    set((s) => {
+      const cfg = Object.fromEntries(Object.entries(s.cfg).filter(([key]) => !key.startsWith(`${id}::`)))
+      return {
+        nodes: s.nodes.filter((n) => n.id !== id),
+        joins: s.joins.filter((j) => j.a.node !== id && j.b.node !== id),
+        cfg,
+        selection: s.selection?.node === id ? null : s.selection,
+      }
+    }),
 
   setNodeRole: (id, role) =>
     set((s) => ({
       nodes: s.nodes.map((n) => {
         if (n.id !== id) return n
-        const stem = n.table.replace(/^(dim_|fact_|fct_)/i, '')
-        const titled = stem.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+        const seeded = seededNamesFor(n.table, role)
         return {
           ...n,
           role,
-          dimName: n.dimName || (role === 'dimension' ? `${titled} Dimension` : n.dimName),
-          hierName: n.hierName || (role === 'dimension' ? `${titled} Hierarchy` : n.hierName),
+          dimName: n.dimName || seeded.dimName,
+          hierName: n.hierName || seeded.hierName,
+          factName: n.factName || seeded.factName,
         }
       }),
     })),
 
   setNodeField: (id, field, value) =>
     set((s) => ({ nodes: s.nodes.map((n) => (n.id === id ? { ...n, [field]: value } : n)) })),
+
+  setColumnDimRole: (nodeId, key, dimRole) =>
+    set((s) => {
+      const existing = s.cfg[key] ?? {}
+      let levelOrder = existing.levelOrder
+      if (dimRole === 'level' && existing.dimRole !== 'level') {
+        const currentLevels = levelsOf(s, nodeId)
+        levelOrder = currentLevels.length ? currentLevels[currentLevels.length - 1].levelOrder + 1 : 0
+      }
+      return { cfg: { ...s.cfg, [key]: { ...existing, dimRole, levelOrder } } }
+    }),
+
+  setLevelOrder: (nodeId, key, direction) =>
+    set((s) => {
+      const levels = levelsOf(s, nodeId)
+      const idx = levels.findIndex((l) => l.key === key)
+      const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+      if (idx < 0 || swapIdx < 0 || swapIdx >= levels.length) return {}
+      const a = levels[idx]
+      const b = levels[swapIdx]
+      return {
+        cfg: {
+          ...s.cfg,
+          [a.key]: { ...s.cfg[a.key], levelOrder: b.levelOrder },
+          [b.key]: { ...s.cfg[b.key], levelOrder: a.levelOrder },
+        },
+      }
+    }),
 
   addJoin: (a, b) => {
     if (a.node === b.node) return

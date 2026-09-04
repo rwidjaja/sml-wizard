@@ -84,23 +84,10 @@ def _split_source_id(source_id: str) -> tuple[str, str]:
     return connection_id, database
 
 
-@sources_bp.get("/sources/<path:source_id>/schemas")
-def list_schemas(source_id: str):
-    client = get_client()
-    if not client:
-        return jsonify({"error": "Not authenticated"}), 401
-
-    connection_id, database = _split_source_id(source_id)
-    if not connection_id or not database:
-        return jsonify({"error": f"Malformed source id '{source_id}'"}), 400
-
-    cache_key = source_id
-    cached = _schema_cache.get(cache_key)
-    if cached and time.time() - cached[0] < _CACHE_TTL_SECONDS:
-        return jsonify(cached[1])
-
-    search = request.args.get("search", "").lower()
-
+def _load_all_schemas(client, connection_id: str, database: str) -> list[dict]:
+    """Fetches every schema/table/column for a source, unfiltered. Cached (by
+    source id only - search is applied in-memory below, never part of the
+    cache key, so a search request can't return a stale unrelated result)."""
     schema_names = [s for s in client.list_schemas(connection_id, database) if not _is_system_schema(s, database)]
 
     # One round-trip per table for column info (AtScale has no bulk endpoint) -
@@ -114,12 +101,7 @@ def list_schemas(source_id: str):
         info = client.get_table_info(connection_id, database, schema_name, table_name)
         return schema_name, table_name, info
 
-    jobs = [
-        (schema_name, table_name)
-        for schema_name, table_names in schema_tables
-        for table_name in table_names
-        if not search or search in table_name.lower()
-    ]
+    jobs = [(schema_name, table_name) for schema_name, table_names in schema_tables for table_name in table_names]
     infos: dict[tuple[str, str], dict] = {}
     if jobs:
         with ThreadPoolExecutor(max_workers=16) as pool:
@@ -130,9 +112,7 @@ def list_schemas(source_id: str):
     for schema_name, table_names in schema_tables:
         tables = []
         for table_name in table_names:
-            info = infos.get((schema_name, table_name))
-            if info is None:
-                continue  # filtered out by search
+            info = infos.get((schema_name, table_name)) or {}
             tables.append(
                 {
                     "name": table_name,
@@ -142,8 +122,34 @@ def list_schemas(source_id: str):
                     ],
                 }
             )
-        if tables or not search:
-            result.append({"name": schema_name, "tables": tables})
+        result.append({"name": schema_name, "tables": tables})
+    return result
 
-    _schema_cache[cache_key] = (time.time(), result)
-    return jsonify(result)
+
+@sources_bp.get("/sources/<path:source_id>/schemas")
+def list_schemas(source_id: str):
+    client = get_client()
+    if not client:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    connection_id, database = _split_source_id(source_id)
+    if not connection_id or not database:
+        return jsonify({"error": f"Malformed source id '{source_id}'"}), 400
+
+    cached = _schema_cache.get(source_id)
+    if cached and time.time() - cached[0] < _CACHE_TTL_SECONDS:
+        all_schemas = cached[1]
+    else:
+        all_schemas = _load_all_schemas(client, connection_id, database)
+        _schema_cache[source_id] = (time.time(), all_schemas)
+
+    search = request.args.get("search", "").lower()
+    if not search:
+        return jsonify(all_schemas)
+
+    filtered = []
+    for schema in all_schemas:
+        tables = [t for t in schema["tables"] if search in t["name"].lower()]
+        if tables:
+            filtered.append({"name": schema["name"], "tables": tables})
+    return jsonify(filtered)

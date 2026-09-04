@@ -29,6 +29,14 @@ export function login(payload: LoginPayload) {
   })
 }
 
+export function checkSession() {
+  return request<{ authenticated: boolean }>('/session')
+}
+
+export function fetchSavedConnections() {
+  return request<{ names: string[] }>('/connections')
+}
+
 export interface SourceSummary {
   id: string
   label: string

@@ -17,6 +17,8 @@ from config import resolve_atscale_connection
 
 session_bp = Blueprint("session", __name__)
 
+connections_bp = Blueprint("connections", __name__)
+
 # In-memory store: app-session-id -> AtScaleClient. Swap for Redis if this needs to
 # survive a process restart or run behind multiple workers.
 _CLIENTS: dict[str, AtScaleClient] = {}
@@ -80,9 +82,29 @@ def _authenticate_and_expiry(client: AtScaleClient) -> tuple[str, float]:
     return scheme, client.env._token_expires_at
 
 
+@session_bp.get("/session")
+def check_session():
+    """Lets the frontend know on load whether this browser already has a live
+    server-side session (e.g. after a page refresh), so it can skip the login
+    screen instead of always starting from a blank form."""
+    return jsonify({"authenticated": get_client() is not None})
+
+
 @session_bp.delete("/session")
 def destroy_session():
     sid = session.pop("sml_wizard_sid", None)
     if sid:
         _CLIENTS.pop(sid, None)
     return jsonify({"ok": True})
+
+
+@connections_bp.get("/connections")
+def list_connections():
+    """Names of AtScale connections available in connections.yaml (never the
+    credentials themselves), so the login screen can offer 'use saved
+    connection' instead of always requiring the form to be filled in."""
+    config = current_app.config["SML_WIZARD_CONFIG"]
+    names = [
+        name for name, conn in config.get("connections", {}).items() if "atscale" in conn
+    ]
+    return jsonify({"names": names})

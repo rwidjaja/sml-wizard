@@ -111,7 +111,14 @@ export function Canvas() {
       onDrop={onDrop}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onClick={() => select(null)}
+      onClick={(e) => {
+        // Only clear selection for a click on the canvas background, not one
+        // that bubbled up from a node - pointerdown's stopPropagation doesn't
+        // stop the later synthetic click event, which would otherwise
+        // immediately undo the selection just made on a node/row.
+        const target = e.target as HTMLElement
+        if (!target.closest('.canvas-node')) select(null)
+      }}
     >
       <div className="section-label" style={{ padding: 16 }}>
         02 — Model Canvas
@@ -121,7 +128,12 @@ export function Canvas() {
           Drop a fact table here to start the model.
         </div>
       )}
-      <svg className="join-svg" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+      <svg
+        className="join-svg"
+        width={2000}
+        height={1400}
+        style={{ position: 'absolute', top: 0, left: 0, width: 2000, height: 1400, pointerEvents: 'none' }}
+      >
         {joins.map((j: Join) => {
           const a = nodes.find((n) => n.id === j.a.node)
           const b = nodes.find((n) => n.id === j.b.node)
@@ -217,7 +229,9 @@ export function Canvas() {
                   <span className="col-type">{col.type}</span>
                   {c?.measure && <span className="chip chip-fact">Σ SUM</span>}
                   {c?.degen && <span className="chip chip-dimension">DEGEN</span>}
-                  {c?.dimRole === 'level' && <span className="chip chip-level">L{c.levelOrder ?? '?'}</span>}
+                  {c?.dimRole === 'level' && (
+                    <span className="chip chip-level">L{c.levelOrder != null ? c.levelOrder + 1 : '?'}</span>
+                  )}
                   {c?.dimRole === 'secondary' && <span className="chip chip-dimension">SEC</span>}
                   {c?.dimRole === 'alias' && <span className="chip chip-join">ALIAS</span>}
                   <span
