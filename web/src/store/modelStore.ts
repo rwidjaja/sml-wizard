@@ -28,12 +28,19 @@ export interface Node {
   role: Role
   dimName?: string
   hierName?: string
+  factName?: string
+  /** Marks this dimension as SML `type: time` with `time_unit` on each level. */
+  isTime?: boolean
 }
 
 export interface Join {
   id: string
   a: { node: string; column: string }
   b: { node: string; column: string }
+  /** Role-play prefix (e.g. "Order", "Ship") for a second FK from the same
+   *  fact to the same conformed dimension - only meaningful on a fact<->dim
+   *  join. Emitted as `role_play: "<prefix> {0}"` in the model relationship. */
+  rolePlay?: string
 }
 
 /** Column key format: `${nodeId}::${column}` — matches the design doc's data-colkey. */
@@ -69,8 +76,15 @@ export interface LinkDrag {
   to: { x: number; y: number }
 }
 
+export interface SourceMeta {
+  dialect: string | null
+  connectionId: string
+  database: string
+}
+
 export interface ModelState {
   sourceId: string | null
+  sourceMeta: SourceMeta | null
   search: string
   openSchemas: Record<string, boolean>
   nodes: Node[]
@@ -79,27 +93,48 @@ export interface ModelState {
   selection: Selection | null
   linkDrag: LinkDrag | null
 
-  setSourceId: (id: string | null) => void
+  setSourceId: (id: string | null, meta?: SourceMeta | null) => void
   setSearch: (search: string) => void
   toggleSchema: (schema: string) => void
   addNode: (schema: string, table: string, x: number, y: number, columns?: ColumnMeta[]) => string
   moveNode: (id: string, x: number, y: number) => void
   removeNode: (id: string) => void
   setNodeRole: (id: string, role: Role) => void
-  setNodeField: (id: string, field: 'dimName' | 'hierName', value: string) => void
+  setNodeField: (id: string, field: 'dimName' | 'hierName' | 'factName', value: string) => void
+  setNodeIsTime: (id: string, isTime: boolean) => void
+  setLevelOrder: (nodeId: string, key: ColumnKey, direction: 'up' | 'down') => void
   addJoin: (a: { node: string; column: string }, b: { node: string; column: string }) => void
   removeJoin: (id: string) => void
+  setJoinRolePlay: (id: string, rolePlay: string | undefined) => void
   select: (selection: Selection | null) => void
   setColumnConfig: (key: ColumnKey, patch: Partial<ColumnConfig>) => void
+  setColumnDimRole: (nodeId: string, key: ColumnKey, dimRole: DimRole) => void
   reset: () => void
+  /** Replaces nodes/joins/cfg wholesale - used by SML import (the wizard's
+   *  only load path; there is no separate proprietary save format). */
+  loadModelData: (data: { nodes: Node[]; joins: Join[]; cfg: Record<ColumnKey, ColumnConfig> }) => void
 }
 
 const columnKey = (nodeId: string, column: string): ColumnKey => `${nodeId}::${column}`
+
+/** Auto-seeded names for a role, derived from the table name (strip dim_/fact_/fct_
+ *  prefix, title-case). Shared by addNode's initial role guess and setNodeRole's
+ *  manual role change so both paths seed dimName/hierName/factName consistently. */
+function seededNamesFor(table: string, role: Role) {
+  const stem = table.replace(/^(dim_|fact_|fct_)/i, '')
+  const titled = stem.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  return {
+    dimName: role === 'dimension' ? `${titled} Dimension` : undefined,
+    hierName: role === 'dimension' ? `${titled} Hierarchy` : undefined,
+    factName: role === 'fact' ? `${titled} Facts` : undefined,
+  }
+}
 
 let seq = 0
 
 export const useModelStore = create<ModelState>((set, get) => ({
   sourceId: null,
+  sourceMeta: null,
   search: '',
   openSchemas: {},
   nodes: [],
@@ -108,7 +143,8 @@ export const useModelStore = create<ModelState>((set, get) => ({
   selection: null,
   linkDrag: null,
 
-  setSourceId: (id) => set({ sourceId: id, nodes: [], joins: [], cfg: {}, selection: null }),
+  setSourceId: (id, meta) =>
+    set({ sourceId: id, sourceMeta: meta ?? null, nodes: [], joins: [], cfg: {}, selection: null }),
   setSearch: (search) => set({ search }),
   toggleSchema: (schema) =>
     set((s) => ({ openSchemas: { ...s.openSchemas, [schema]: !s.openSchemas[schema] } })),
@@ -116,8 +152,9 @@ export const useModelStore = create<ModelState>((set, get) => ({
   addNode: (schema, table, x, y, columns = []) => {
     const id = `n${seq++}`
     const role: Role = /^(fct|fact)/i.test(table) ? 'fact' : /^dim/i.test(table) ? 'dimension' : null
+    const names = seededNamesFor(table, role)
     set((s) => ({
-      nodes: [...s.nodes, { id, schema, table, columns, x: Math.max(0, x), y: Math.max(0, y), role }],
+      nodes: [...s.nodes, { id, schema, table, columns, x: Math.max(0, x), y: Math.max(0, y), role, ...names }],
       selection: { node: id, column: null },
     }))
     return id
@@ -129,29 +166,67 @@ export const useModelStore = create<ModelState>((set, get) => ({
     })),
 
   removeNode: (id) =>
-    set((s) => ({
-      nodes: s.nodes.filter((n) => n.id !== id),
-      joins: s.joins.filter((j) => j.a.node !== id && j.b.node !== id),
-      selection: s.selection?.node === id ? null : s.selection,
-    })),
+    set((s) => {
+      const cfg = Object.fromEntries(Object.entries(s.cfg).filter(([key]) => !key.startsWith(`${id}::`)))
+      return {
+        nodes: s.nodes.filter((n) => n.id !== id),
+        joins: s.joins.filter((j) => j.a.node !== id && j.b.node !== id),
+        cfg,
+        selection: s.selection?.node === id ? null : s.selection,
+      }
+    }),
 
   setNodeRole: (id, role) =>
     set((s) => ({
       nodes: s.nodes.map((n) => {
         if (n.id !== id) return n
-        const stem = n.table.replace(/^(dim_|fact_|fct_)/i, '')
-        const titled = stem.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+        const seeded = seededNamesFor(n.table, role)
         return {
           ...n,
           role,
-          dimName: n.dimName || (role === 'dimension' ? `${titled} Dimension` : n.dimName),
-          hierName: n.hierName || (role === 'dimension' ? `${titled} Hierarchy` : n.hierName),
+          dimName: n.dimName || seeded.dimName,
+          hierName: n.hierName || seeded.hierName,
+          factName: n.factName || seeded.factName,
         }
       }),
     })),
 
   setNodeField: (id, field, value) =>
     set((s) => ({ nodes: s.nodes.map((n) => (n.id === id ? { ...n, [field]: value } : n)) })),
+
+  setNodeIsTime: (id, isTime) =>
+    set((s) => ({ nodes: s.nodes.map((n) => (n.id === id ? { ...n, isTime } : n)) })),
+
+  setJoinRolePlay: (id, rolePlay) =>
+    set((s) => ({ joins: s.joins.map((j) => (j.id === id ? { ...j, rolePlay } : j)) })),
+
+  setColumnDimRole: (nodeId, key, dimRole) =>
+    set((s) => {
+      const existing = s.cfg[key] ?? {}
+      let levelOrder = existing.levelOrder
+      if (dimRole === 'level' && existing.dimRole !== 'level') {
+        const currentLevels = levelsOf(s, nodeId)
+        levelOrder = currentLevels.length ? currentLevels[currentLevels.length - 1].levelOrder + 1 : 0
+      }
+      return { cfg: { ...s.cfg, [key]: { ...existing, dimRole, levelOrder } } }
+    }),
+
+  setLevelOrder: (nodeId, key, direction) =>
+    set((s) => {
+      const levels = levelsOf(s, nodeId)
+      const idx = levels.findIndex((l) => l.key === key)
+      const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+      if (idx < 0 || swapIdx < 0 || swapIdx >= levels.length) return {}
+      const a = levels[idx]
+      const b = levels[swapIdx]
+      return {
+        cfg: {
+          ...s.cfg,
+          [a.key]: { ...s.cfg[a.key], levelOrder: b.levelOrder },
+          [b.key]: { ...s.cfg[b.key], levelOrder: a.levelOrder },
+        },
+      }
+    }),
 
   addJoin: (a, b) => {
     if (a.node === b.node) return
@@ -172,6 +247,17 @@ export const useModelStore = create<ModelState>((set, get) => ({
     set((s) => ({ cfg: { ...s.cfg, [key]: { ...s.cfg[key], ...patch } } })),
 
   reset: () => set({ nodes: [], joins: [], cfg: {}, selection: null, linkDrag: null }),
+
+  loadModelData: (data) => {
+    // Imported/loaded ids (n0, j0, ...) come from a separate counter (the
+    // backend's parser, or a previous session) - bump the local `seq` past
+    // whatever's highest here so a newly-added node/join can't collide.
+    const maxNum = (id: string) => parseInt(id.replace(/^\D+/, ''), 10) || 0
+    const highest = Math.max(0, ...data.nodes.map((n) => maxNum(n.id)), ...data.joins.map((j) => maxNum(j.id)))
+    seq = Math.max(seq, highest + 1)
+    set({ nodes: data.nodes, joins: data.joins, cfg: data.cfg, selection: null, linkDrag: null })
+  },
+
 }))
 
 // ---- Derived selectors -----------------------------------------------------

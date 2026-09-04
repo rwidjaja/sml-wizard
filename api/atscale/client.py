@@ -1,14 +1,16 @@
 """AtScale REST client.
 
 Ported from reference/ps-utils/src/services/AtScaleRestClientService.ts and
-RestClientService.ts. Covers the auth + metadata endpoints needed for Phase 2
-(source picker, schema tree). The cookie-auth flow and the git-deploy endpoint
-are added in the Phase 9 publish pipeline (api/atscale/deploy.py) — not needed
-for browsing data sources.
+RestClientService.ts, including the cookie-auth flow required specifically by
+`/wapi/git/deploy/catalog` (see AtScaleEnvironment._acquire_session_cookie -
+faithfully ported from acquireSessionCookie() in the TS source, a headless
+Keycloak authorization-code flow: GET /signin, scrape the login form action,
+POST credentials, follow the redirect, capture the session cookie).
 """
 
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -42,19 +44,28 @@ class AtScaleEnvironment:
     auth_type: str = "keycloak"  # "keycloak" | "basic"
     insecure: bool = True
     use_raw_api_token: bool = False
+    session_cookie: str | None = None
+    #: When True, authenticate() acquires a Design Center session cookie
+    #: instead of a Bearer JWT - required by /wapi/git/deploy/catalog.
+    cookie_auth: bool = False
 
     _token: str | None = field(default=None, init=False, repr=False)
     _token_expires_at: float = field(default=0.0, init=False, repr=False)
+    _cookie_header: str | None = field(default=None, init=False, repr=False)
 
     def invalidate(self) -> None:
         self._token = None
         self._token_expires_at = 0.0
+        self._cookie_header = None
 
     def _keycloak_token_url(self) -> str:
         return f"{self.base_url}/auth/realms/{self.realm}/protocol/openid-connect/token"
 
     def authenticate(self, force: bool = False) -> tuple[str, dict[str, str]]:
-        """Returns (scheme, headers) - either bearer or basic auth headers."""
+        """Returns (scheme, headers) - bearer, basic, or cookie auth headers."""
+        if self.cookie_auth:
+            return self._authenticate_cookie(force)
+
         if not force and self._token and time.time() < self._token_expires_at:
             return "bearer", {"Authorization": f"Bearer {self._token}"}
 
@@ -76,6 +87,84 @@ class AtScaleEnvironment:
         self._token = token
         self._token_expires_at = time.time() + 3600
         return "bearer", {"Authorization": f"Bearer {self._token}"}
+
+    def _authenticate_cookie(self, force: bool) -> tuple[str, dict[str, str]]:
+        if not force and self._cookie_header:
+            return "cookie", {"Cookie": self._cookie_header}
+
+        if self.session_cookie:
+            self._cookie_header = f"auth_session={self.session_cookie}"
+            return "cookie", {"Cookie": self._cookie_header}
+
+        # SSO environments (no username) fall back to an exchanged JWT - the
+        # Design Center metadata endpoints accept that in addition to a cookie.
+        if self.api_token and not self.username:
+            token = self._exchange_api_token()
+            self._token = token
+            self._token_expires_at = time.time() + 3600
+            return "bearer", {"Authorization": f"Bearer {self._token}"}
+
+        self._cookie_header = self._acquire_session_cookie()
+        return "cookie", {"Cookie": self._cookie_header}
+
+    def _acquire_session_cookie(self) -> str:
+        """Headless Keycloak authorization-code flow (ported verbatim from
+        acquireSessionCookie() in AtScaleRestClientService.ts):
+          1. GET /signin -> state cookie + Keycloak redirect URL
+          2. GET <Keycloak login page> -> scrape the login form's action URL
+          3. POST username/password to that URL -> 302 to /signin/callback?code=...
+          4. GET the callback URL -> Set-Cookie: auth_session=... (or better-auth's
+             __Secure-better-auth.session_token on newer AtScale builds)
+        """
+        if not self.username or not self.password:
+            raise AtScaleAuthError(
+                "Deploying requires Keycloak credentials to acquire the Design Center "
+                "session cookie automatically. Add 'username' and 'password' to the "
+                "atscale: block in connections.yaml."
+            )
+
+        session = requests.Session()
+        session.verify = not self.insecure
+
+        r1 = session.get(f"{self.base_url}/signin", allow_redirects=False)
+        kc_url = r1.headers.get("Location", "")
+        if not kc_url:
+            raise AtScaleAuthError(
+                f"{self.base_url}/signin did not redirect to Keycloak (status {r1.status_code}). "
+                "Verify the AtScale URL is correct."
+            )
+
+        r2 = session.get(kc_url, allow_redirects=False)
+        match = re.search(r'["\'`](https?:[^"\'`]+login-actions/authenticate[^"\'`]+)[`"\']', r2.text)
+        if not match:
+            raise AtScaleAuthError(
+                "Could not extract the Keycloak login form action URL from the login page "
+                "- the Keycloak theme may have changed."
+            )
+        form_action_url = match.group(1)
+
+        r3 = session.post(
+            form_action_url,
+            data={"username": self.username, "password": self.password},
+            allow_redirects=False,
+        )
+        if not (300 <= r3.status_code < 400):
+            raise AtScaleAuthError(
+                f"Keycloak login failed (status {r3.status_code}). "
+                "Check username/password in connections.yaml's atscale: block."
+            )
+        raw_location = r3.headers.get("Location", "")
+        callback_url = raw_location if raw_location.startswith("http") else f"{self.base_url}{raw_location}"
+
+        session.get(callback_url, allow_redirects=False)
+
+        cookie_names = ("auth_session", "__Secure-better-auth.session_token")
+        if not any(c in session.cookies for c in cookie_names):
+            raise AtScaleAuthError(
+                "/signin/callback did not set a session cookie (expected auth_session or "
+                "__Secure-better-auth.session_token). The Keycloak code exchange may have failed."
+            )
+        return "; ".join(f"{c.name}={c.value}" for c in session.cookies)
 
     def _exchange_api_token(self) -> str:
         resp = requests.post(
@@ -180,3 +269,30 @@ class AtScaleClient:
     # -- deployments -------------------------------------------------------------------
     def list_deployed_projects(self) -> list[dict[str, Any]]:
         return self._dispatch("GET", "/wapi/p/projects/deployed").json()
+
+    def deploy_repo(
+        self,
+        repo_id: str,
+        sml_raw_files: list[dict[str, str]],
+        project_xml: str,
+        project_name: str,
+        con_ids: list[str],
+        project_id: str,
+        tableau_servers: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """POST /wapi/git/deploy/catalog - requires `self.env.cookie_auth = True`
+        (a separate AtScaleEnvironment/AtScaleClient from the one used for
+        /wapi/p/* Bearer-JWT calls, per ps-utils' dual-env design)."""
+        body = {
+            "repoId": repo_id,
+            "projectId": project_id,
+            "projectName": project_name,
+            "conIds": con_ids,
+            "smlRawFiles": sml_raw_files,
+            "projectXml": project_xml,
+            "cubes": [],
+            "tableauServers": tableau_servers or [],
+            "perspectives": [],
+        }
+        resp = self._dispatch("POST", "/wapi/git/deploy/catalog", json=body)
+        return resp.json() if resp.text else {}

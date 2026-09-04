@@ -1,12 +1,416 @@
-// Phase 4 fleshes this out: table role/names, fact metric/degenerate config,
-// dynamic hierarchy level/secondary/alias config (see modelStore.ts's
-// levelsOf/secondariesOf/aliasesOf — arbitrary-length chain, not fixed L1/L2/L3),
-// hierarchy readout.
+import {
+  aliasesOf,
+  levelsOf,
+  secondariesOf,
+  useModelStore,
+  type AggFn,
+  type ColumnKey,
+  type DimRole,
+} from '../store/modelStore'
+
+const AGG_OPTIONS: AggFn[] = ['SUM', 'MIN', 'MAX', 'COUNT', 'COUNT DISTINCT', 'AVG']
+
+function titleCase(s: string) {
+  return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
 export function Inspector() {
+  const nodes = useModelStore((s) => s.nodes)
+  const joins = useModelStore((s) => s.joins)
+  const selection = useModelStore((s) => s.selection)
+  const select = useModelStore((s) => s.select)
+  const setNodeRole = useModelStore((s) => s.setNodeRole)
+  const setNodeField = useModelStore((s) => s.setNodeField)
+  const setNodeIsTime = useModelStore((s) => s.setNodeIsTime)
+  const cfg = useModelStore((s) => s.cfg)
+  const setColumnConfig = useModelStore((s) => s.setColumnConfig)
+  const setColumnDimRole = useModelStore((s) => s.setColumnDimRole)
+  const setLevelOrder = useModelStore((s) => s.setLevelOrder)
+  const fullState = useModelStore((s) => s)
+
+  const node = selection ? nodes.find((n) => n.id === selection.node) : undefined
+
+  if (!node) {
+    return (
+      <aside className="panel-right">
+        <div className="section-label">03 — Column Inspector</div>
+        <div style={{ color: 'var(--as-muted)' }}>No selection</div>
+      </aside>
+    )
+  }
+
+  const joinCount = joins.filter((j) => j.a.node === node.id || j.b.node === node.id).length
+  const levels = levelsOf(fullState, node.id)
+
+  if (!selection?.column) {
+    // 4a. Table selected.
+    return (
+      <aside className="panel-right">
+        <div className="section-label">
+          03 — Column Inspector <span className="status-word">{node.role ? node.role.toUpperCase() : 'ROLE NOT SET'}</span>
+        </div>
+
+        <div className="identity-path">
+          {node.schema} / {node.table}
+        </div>
+        <div className="identity-title">{node.table}</div>
+        <div className="identity-chips">
+          <span className="chip chip-neutral">{node.columns.length} COLUMNS</span>
+          <span className="chip chip-neutral">{joinCount} JOINS</span>
+        </div>
+
+        <div className="role-segment">
+          <button
+            className={`role-btn ${node.role === 'fact' ? 'role-btn-fact-active' : ''}`}
+            onClick={() => setNodeRole(node.id, 'fact')}
+          >
+            Fact
+          </button>
+          <button
+            className={`role-btn ${node.role === 'dimension' ? 'role-btn-dim-active' : ''}`}
+            onClick={() => setNodeRole(node.id, 'dimension')}
+          >
+            Dimension
+          </button>
+        </div>
+
+        {node.role === 'fact' && (
+          <label className="field">
+            Fact dataset name
+            <input
+              value={node.factName ?? ''}
+              onChange={(e) => setNodeField(node.id, 'factName', e.target.value)}
+            />
+            <span className="field-note">Every metric and degenerate dimension on this table belongs to this fact dataset.</span>
+          </label>
+        )}
+
+        {node.role === 'dimension' && (
+          <>
+            <label className="field">
+              Dimension name
+              <input value={node.dimName ?? ''} onChange={(e) => setNodeField(node.id, 'dimName', e.target.value)} />
+            </label>
+            <div className="hier-name-block">
+              <label className="field">
+                Hierarchy name
+                <input
+                  value={node.hierName ?? ''}
+                  onChange={(e) => setNodeField(node.id, 'hierName', e.target.value)}
+                />
+                <span className="field-note">
+                  Every level, alias and secondary attribute defined on this table is created under this hierarchy.
+                </span>
+              </label>
+            </div>
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={!!node.isTime}
+                onChange={(e) => setNodeIsTime(node.id, e.target.checked)}
+              />
+              Time dimension
+            </label>
+            <div className="field-note" style={{ marginBottom: 12 }}>
+              Marks this as SML <code>type: time</code> - each level is emitted with a <code>time_unit</code>.
+            </div>
+          </>
+        )}
+
+        {node.role === 'dimension' && (
+          <HierarchyReadout nodeId={node.id} hierName={node.hierName} />
+        )}
+        {node.role === 'fact' && <MetricsReadout nodeId={node.id} factName={node.factName} />}
+      </aside>
+    )
+  }
+
+  // 4b. Column selected.
+  const key: ColumnKey = `${node.id}::${selection.column}`
+  const column = node.columns.find((c) => c.name === selection.column)
+  const c = cfg[key] ?? {}
+
+  function seedNames(patch: Partial<typeof c>) {
+    const display = c.display || titleCase(selection!.column!)
+    const query = c.query || selection!.column!
+    setColumnConfig(key, { display, query, ...patch })
+  }
+
   return (
     <aside className="panel-right">
-      <div className="section-label">03 — Column Inspector</div>
-      <div style={{ color: 'var(--as-muted)' }}>No selection — Phase 4.</div>
+      <div className="section-label">
+        03 — Column Inspector <span className="status-word">{node.role ? node.role.toUpperCase() : 'ROLE NOT SET'}</span>
+      </div>
+
+      <div className="identity-path">
+        {node.schema} / {node.table}
+      </div>
+      <div className="identity-title-lg">{selection.column}</div>
+      <div className="identity-chips">
+        <span className="chip chip-neutral">{column?.type}</span>
+      </div>
+
+      <div className="role-strip">
+        <span className={`chip ${node.role === 'fact' ? 'chip-fact' : 'chip-dimension'}`}>
+          {(node.role ?? 'unset').toUpperCase()}
+        </span>
+        {node.role === 'dimension' && node.dimName}
+        <button className="btn-table-back" onClick={() => select({ node: node.id, column: null })}>
+          TABLE
+        </button>
+      </div>
+
+      {node.role === 'fact' && (
+        <>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={!!c.measure}
+              onChange={(e) => (e.target.checked ? seedNames({ measure: true, agg: c.agg ?? 'SUM' }) : setColumnConfig(key, { measure: false }))}
+            />
+            Create metric
+          </label>
+          {c.measure && (
+            <div className="config-block config-block-fact">
+              <label className="field">
+                Aggregate function
+                <select value={c.agg ?? 'SUM'} onChange={(e) => setColumnConfig(key, { agg: e.target.value as AggFn })}>
+                  {AGG_OPTIONS.map((a) => (
+                    <option key={a} value={a}>
+                      {a}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                Display name
+                <input value={c.display ?? ''} onChange={(e) => setColumnConfig(key, { display: e.target.value })} />
+              </label>
+              <label className="field">
+                Query name
+                <input
+                  className="mono-input"
+                  value={c.query ?? ''}
+                  onChange={(e) => setColumnConfig(key, { query: e.target.value })}
+                />
+              </label>
+            </div>
+          )}
+
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={!!c.degen}
+              onChange={(e) =>
+                e.target.checked
+                  ? setColumnConfig(key, {
+                      degen: true,
+                      degenDisplay: c.degenDisplay || titleCase(selection!.column!),
+                      degenQuery: c.degenQuery || selection!.column!,
+                    })
+                  : setColumnConfig(key, { degen: false })
+              }
+            />
+            Degenerate dimension
+          </label>
+          <div className="field-note">Expose this fact column as an attribute without a dimension table.</div>
+          {c.degen && (
+            <div className="config-block config-block-dim">
+              <label className="field">
+                Display name
+                <input
+                  value={c.degenDisplay ?? ''}
+                  onChange={(e) => setColumnConfig(key, { degenDisplay: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                Query name
+                <input
+                  className="mono-input"
+                  value={c.degenQuery ?? ''}
+                  onChange={(e) => setColumnConfig(key, { degenQuery: e.target.value })}
+                />
+              </label>
+            </div>
+          )}
+        </>
+      )}
+
+      {node.role === 'dimension' && (
+        <>
+          <div className="attr-role-cards">
+            {(
+              [
+                ['none', 'Not modelled', 'This column is not exposed in the model.'],
+                ['level', 'Hierarchy level', 'Added to the end of this table’s level chain.'],
+                ['secondary', 'Secondary attribute', 'Hangs off a level and inherits its key.'],
+                ['alias', 'Level alias', 'Replaces a level’s label - same key, alternate name column.'],
+              ] as [DimRole, string, string][]
+            ).map(([role, label, note]) => (
+              <label key={role} className={`attr-card ${(c.dimRole ?? 'none') === role ? 'attr-card-selected' : ''}`}>
+                <input
+                  type="radio"
+                  name="dimRole"
+                  checked={(c.dimRole ?? 'none') === role}
+                  onChange={() => {
+                    setColumnDimRole(node.id, key, role)
+                    if (role !== 'none') seedNames({})
+                  }}
+                />
+                <div>
+                  <div className="attr-card-label">{label}</div>
+                  <div className="attr-card-note">{note}</div>
+                </div>
+              </label>
+            ))}
+          </div>
+
+          {(c.dimRole === 'secondary' || c.dimRole === 'alias') && (
+            <label className="field">
+              {c.dimRole === 'secondary' ? 'Attach to hierarchy level' : 'Alias of level'}
+              <select
+                value={c.attachToKey ?? ''}
+                onChange={(e) => setColumnConfig(key, { attachToKey: e.target.value })}
+              >
+                <option value="">Select a level…</option>
+                {levels.map((l) => (
+                  <option key={l.key} value={l.key}>
+                    L{l.levelOrder + 1} — {l.config.display ?? titleCase(l.column)}
+                  </option>
+                ))}
+              </select>
+              {levels.length === 0 && (
+                <span className="field-note">
+                  No levels defined yet on this table - mark a column as "Hierarchy level" first.
+                </span>
+              )}
+            </label>
+          )}
+
+          {c.dimRole && c.dimRole !== 'none' && (
+            <div className="config-block config-block-dim">
+              <label className="field">
+                Display name
+                <input value={c.display ?? ''} onChange={(e) => setColumnConfig(key, { display: e.target.value })} />
+              </label>
+              <label className="field">
+                Query name
+                <input
+                  className="mono-input"
+                  value={c.query ?? ''}
+                  onChange={(e) => setColumnConfig(key, { query: e.target.value })}
+                />
+              </label>
+            </div>
+          )}
+        </>
+      )}
+
+      {node.role === 'dimension' && <HierarchyReadout nodeId={node.id} hierName={node.hierName} />}
+      {node.role === 'fact' && <MetricsReadout nodeId={node.id} factName={node.factName} />}
     </aside>
   )
+
+  function MetricsReadout({ nodeId, factName }: { nodeId: string; factName?: string }) {
+    const state = useModelStore.getState()
+    const entries = Object.entries(state.cfg).filter(([k]) => k.startsWith(`${nodeId}::`))
+    const metrics = entries.filter(([, c]) => c.measure)
+    const degenerates = entries.filter(([, c]) => c.degen)
+    if (metrics.length === 0 && degenerates.length === 0) {
+      return null
+    }
+    return (
+      <div className="hierarchy-readout">
+        <div className="hierarchy-title">
+          <span className="hierarchy-glyph">
+            <span />
+            <span />
+            <span />
+            <span />
+          </span>
+          {factName || 'Untitled Fact Dataset'}
+        </div>
+        {metrics.map(([k, c]) => (
+          <div key={k} className="metric-row">
+            <span className="chip chip-fact">Σ {c.agg}</span>
+            <span className="attr-label">{c.display ?? k.split('::')[1]}</span>
+            <span className="level-source">{c.query ?? k.split('::')[1]}</span>
+          </div>
+        ))}
+        {degenerates.map(([k, c]) => (
+          <div key={k} className="metric-row">
+            <span className="chip chip-dimension">DEGEN</span>
+            <span className="attr-label">{c.degenDisplay ?? k.split('::')[1]}</span>
+            <span className="level-source">{c.degenQuery ?? k.split('::')[1]}</span>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  function HierarchyReadout({ nodeId, hierName }: { nodeId: string; hierName?: string }) {
+    const state = useModelStore.getState()
+    const lvls = levelsOf(state, nodeId)
+    if (lvls.length === 0) {
+      return null
+    }
+    return (
+      <div className="hierarchy-readout">
+        <div className="hierarchy-title">
+          <span className="hierarchy-glyph">
+            <span />
+            <span />
+            <span />
+            <span />
+          </span>
+          {hierName || 'Untitled Hierarchy'}
+        </div>
+        {lvls.map((l, idx) => {
+          const secs = secondariesOf(state, l.key)
+          const aliases = aliasesOf(state, l.key)
+          return (
+            <div key={l.key}>
+              <div className="level-row">
+                <span className="level-flag" style={{ color: idx === 0 ? 'var(--as-flag-l1)' : 'var(--as-flag-other)' }}>
+                  ⚑
+                </span>
+                <div className="level-row-content">
+                  <button className="level-reorder" disabled={idx === 0} onClick={() => setLevelOrder(nodeId, l.key, 'up')}>
+                    ▲
+                  </button>
+                  <button
+                    className="level-reorder"
+                    disabled={idx === lvls.length - 1}
+                    onClick={() => setLevelOrder(nodeId, l.key, 'down')}
+                  >
+                    ▼
+                  </button>
+                  <span className="level-arrow">↳</span>
+                  <span className="level-name">{l.config.display ?? titleCase(l.column)}</span>
+                  <span className="level-source">{l.column}</span>
+                  <span className="chip chip-level">L{idx + 1}</span>
+                </div>
+              </div>
+              {aliases.map((a) => (
+                <AttrRow key={a.key} label={a.config.display ?? a.key.split('::')[1]} tag="ALIAS" depth={1} />
+              ))}
+              {secs.map((s) => (
+                <AttrRow key={s.key} label={s.config.display ?? s.key.split('::')[1]} tag="SECONDARY" depth={1} />
+              ))}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
+  function AttrRow({ label, tag, depth }: { label: string; tag: string; depth: number }) {
+    return (
+      <div className="attr-row" style={{ paddingLeft: 28 + depth * 14 }}>
+        <span className="attr-ring" />
+        <span className="attr-label">{label}</span>
+        <span className="chip chip-join">{tag}</span>
+      </div>
+    )
+  }
 }
