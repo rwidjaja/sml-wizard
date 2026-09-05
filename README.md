@@ -135,14 +135,26 @@ it.
 
 ## Getting started
 
-1. **Backend**: create/activate a Python 3.11+ virtualenv, then
-   `pip install -r api/requirements.txt`. Copy your AtScale/Git connection
-   details into `api/connections.yaml` (gitignored — never commit real
-   credentials) — see `api/config.py`'s module docstring for the schema.
-   Run with `python api/app.py` (serves on `:5000`).
-2. **Frontend**: `cd web && npm install && npm run dev` (serves on `:5173`,
-   proxying `/api` to the Flask backend).
-3. **Validation**: `npx sml-cli` needs to be reachable (via `npx`) for the
-   "Validate with sml-cli" and Deploy steps.
+1. **One-time setup**:
+   - Create/activate a Python 3.11+ virtualenv and `pip install -r
+     api/requirements.txt`.
+   - Copy your AtScale/Git connection details into `api/connections.yaml`
+     (gitignored — never commit real credentials) — see `api/config.py`'s
+     module docstring for the schema.
+   - `npx sml-cli` needs to be reachable for the "Validate with sml-cli" and
+     Deploy steps.
+2. **Run it**: `./start.sh` from the repo root. It kills anything already
+   bound to the app's ports (or left running from a previous `./start.sh`),
+   then starts the Flask API (`:5000`) and Vite dev server (`:5173`) in the
+   background — the first run also does `npm install` for you if
+   `web/node_modules` isn't there yet. Logs land in `.logs/api.log` and
+   `.logs/web.log`.
+3. **Open the UI**: **http://localhost:5173** in your browser. If
+   `connections.yaml` has a saved AtScale connection, it logs you in
+   automatically; otherwise you'll land on the connect form.
 4. **Tests**: `cd api && pytest tests/` runs the generator/parser/validator
    test suite.
+
+To run the two halves individually instead of `start.sh` (e.g. for more
+verbose foreground logs while developing): `python api/app.py` for the
+backend, `cd web && npm run dev` for the frontend.
