@@ -7,6 +7,7 @@ available in CI.
 from __future__ import annotations
 
 from atscale.preview import (
+    _is_system_property,
     build_initial_mdx,
     build_sql_query,
     extract_sql_column_name,
@@ -156,6 +157,19 @@ def test_parse_xmla_result():
     result = parse_xmla_result(xml)
     assert result["columns"] == ["Row Labels", "Sales Amount"]
     assert result["rows"] == [["Bikes", "100"], ["Accessories", "200"]]
+
+
+def test_is_system_property():
+    # Confirmed against a real deployed cube (sample-dev-model): every level
+    # always carries NAME/MEMBER_VALUE/KEY0 as MDSCHEMA_PROPERTIES rows - only
+    # a real secondary attribute (e.g. "Product Line", "Year Name") should
+    # survive the filter used to build each level's secondaryAttributes list.
+    assert _is_system_property("NAME")
+    assert _is_system_property("MEMBER_VALUE")
+    assert _is_system_property("KEY0")
+    assert _is_system_property("KEY12")
+    assert not _is_system_property("Product Line")
+    assert not _is_system_property("Due year_name")
 
 
 def test_parse_sql_result():

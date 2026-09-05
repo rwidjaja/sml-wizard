@@ -199,9 +199,15 @@ export function fetchPreviewCatalogs() {
   return request<CatalogCube[]>('/preview/catalogs')
 }
 
+export interface PreviewSecondaryAttribute {
+  name: string
+  caption: string
+}
+
 export interface PreviewLevel {
   uniqueName: string
   caption: string
+  secondaryAttributes: PreviewSecondaryAttribute[]
 }
 
 export interface PreviewHierarchy {

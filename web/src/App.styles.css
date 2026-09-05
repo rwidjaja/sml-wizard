@@ -912,6 +912,15 @@
   padding-left: 26px;
 }
 
+.preview-listbox-secondary {
+  padding-left: 44px;
+  cursor: default;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--as-muted-56);
+}
+
 .preview-dropzone {
   border: 1px dashed var(--as-muted-30);
   padding: 10px;

@@ -163,13 +163,23 @@ export function PreviewTab() {
                         [H] {hier.caption}
                       </div>
                       {hier.levels.map((lvl) => (
-                        <div
-                          key={lvl.uniqueName}
-                          className="preview-listbox-item preview-listbox-level"
-                          draggable
-                          onDragStart={(e) => onDragStart(e, { kind: 'level', uniqueName: lvl.uniqueName, caption: lvl.caption })}
-                        >
-                          [L] {lvl.caption}
+                        <div key={lvl.uniqueName}>
+                          <div
+                            className="preview-listbox-item preview-listbox-level"
+                            draggable
+                            onDragStart={(e) => onDragStart(e, { kind: 'level', uniqueName: lvl.uniqueName, caption: lvl.caption })}
+                          >
+                            [L] {lvl.caption}
+                          </div>
+                          {lvl.secondaryAttributes.map((attr) => (
+                            <div
+                              key={attr.name}
+                              className="preview-listbox-item preview-listbox-secondary"
+                              title="Secondary attribute - browsable here, not yet queryable on its own (drag the level instead)"
+                            >
+                              <span className="chip chip-dimension">SEC</span> {attr.caption}
+                            </div>
+                          ))}
                         </div>
                       ))}
                     </div>

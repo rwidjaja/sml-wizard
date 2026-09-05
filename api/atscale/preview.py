@@ -13,6 +13,7 @@ or Basic-auth XMLA login.
 
 from __future__ import annotations
 
+import re
 import xml.etree.ElementTree as ET
 from typing import Any
 
@@ -151,6 +152,42 @@ MEASURES_QUERY = """<?xml version="1.0" encoding="utf-8"?>
     </Execute>
   </soap:Body>
 </soap:Envelope>"""
+
+
+#: Not in the reference tool - added because level-only metadata was hiding
+#: every secondary attribute the model actually has (e.g. a "Product Line"
+#: alias on the Product Level, or "Year Name" on a Date level). AtScale
+#: exposes these as MDSCHEMA_PROPERTIES rows scoped to the level they attach
+#: to, alongside three system properties every level always has (NAME,
+#: MEMBER_VALUE, KEY0/KEY1/...) - _SYSTEM_PROPERTY_NAMES below filters those
+#: out, confirmed against a real deployed cube (sample-dev-model: 35 levels x
+#: 3 system properties = 105 rows, plus 9 real secondary attributes = 114).
+PROPERTIES_QUERY = """<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <Execute xmlns="urn:schemas-microsoft-com:xml-analysis">
+      <Command>
+        <Statement>
+          SELECT [LEVEL_UNIQUE_NAME], [PROPERTY_NAME], [PROPERTY_CAPTION]
+          FROM $system.MDSCHEMA_PROPERTIES
+          WHERE [CUBE_NAME] = '{cube_name}'
+        </Statement>
+      </Command>
+      <Properties>
+        <PropertyList>
+          <Catalog>{catalog}</Catalog>
+          <Cube>{cube_name}</Cube>
+        </PropertyList>
+      </Properties>
+    </Execute>
+  </soap:Body>
+</soap:Envelope>"""
+
+_SYSTEM_PROPERTY_NAMES = {"NAME", "MEMBER_VALUE"}
+
+
+def _is_system_property(name: str) -> bool:
+    return name in _SYSTEM_PROPERTY_NAMES or bool(re.fullmatch(r"KEY\d+", name))
 
 
 def build_xmla_request(mdx_query: str, catalog: str, cube: str, use_agg: bool = True, use_cache: bool = True) -> str:
@@ -411,6 +448,19 @@ def load_cube_metadata(client: AtScaleClient, catalog: str, cube: str) -> dict[s
         client.run_xmla(MEASURES_QUERY.format(catalog=catalog, cube_name=cube)),
         ["MEASURE_NAME", "MEASURE_UNIQUE_NAME", "MEASURE_CAPTION", "MEASURE_DISPLAY_FOLDER"],
     )
+    properties = parse_rows(
+        client.run_xmla(PROPERTIES_QUERY.format(catalog=catalog, cube_name=cube)),
+        ["LEVEL_UNIQUE_NAME", "PROPERTY_NAME", "PROPERTY_CAPTION"],
+    )
+
+    secondary_by_level: dict[str, list[dict]] = {}
+    for p in properties:
+        name = p.get("PROPERTY_NAME")
+        if not name or _is_system_property(name):
+            continue
+        secondary_by_level.setdefault(p["LEVEL_UNIQUE_NAME"], []).append(
+            {"name": name, "caption": p.get("PROPERTY_CAPTION") or name}
+        )
 
     hierarchies_by_dim: dict[str, list[dict]] = {}
     for h in hierarchies:
@@ -433,7 +483,11 @@ def load_cube_metadata(client: AtScaleClient, catalog: str, cube: str) -> dict[s
                     "uniqueName": hier_name,
                     "caption": h.get("HIERARCHY_CAPTION") or h.get("HIERARCHY_NAME"),
                     "levels": [
-                        {"uniqueName": lv["LEVEL_UNIQUE_NAME"], "caption": lv.get("LEVEL_CAPTION") or lv.get("LEVEL_NAME")}
+                        {
+                            "uniqueName": lv["LEVEL_UNIQUE_NAME"],
+                            "caption": lv.get("LEVEL_CAPTION") or lv.get("LEVEL_NAME"),
+                            "secondaryAttributes": secondary_by_level.get(lv["LEVEL_UNIQUE_NAME"], []),
+                        }
                         for lv in levels_by_hier.get(hier_name, [])
                     ],
                 }
