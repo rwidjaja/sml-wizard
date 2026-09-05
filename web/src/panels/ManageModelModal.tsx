@@ -45,8 +45,6 @@ export function ManageModelModal({ onClose }: Props) {
   // placeholder (real sample repos ship with "<YOUR DATABASE>") - so try to
   // match it against this session's actual registered sources first, and
   // only fall back to the guessed values (dialect included) if nothing matches.
-  // setSourceId always clears nodes/joins/cfg/calculations, so this must run
-  // *before* loadModelData, never after.
   async function applyImportedSource(source: ImportedModel['source']) {
     if (!source) return
     const sources = await fetchSources().catch(() => [])
