@@ -53,6 +53,29 @@ from .rules import AGG_TO_CALC_METHOD
 
 CALC_METHOD_TO_AGG = {v: k for k, v in AGG_TO_CALC_METHOD.items()}
 
+#: A connection's `as_connection` names AtScale's own connection object, not a
+#: dialect string (build.py's identifier-casing rules need "postgresql" /
+#: "snowflake" / etc.) - this is a best-effort guess from that name for a
+#: freshly-imported model; the field can always be re-picked via the Data
+#: Source panel, which gets the dialect straight from AtScale instead.
+_DIALECT_HINTS = {
+    "snowflake": "snowflake",
+    "postgres": "postgresql",
+    "databricks": "databricks",
+    "bigquery": "bigquery",
+    "redshift": "redshift",
+}
+
+
+def _guess_dialect(as_connection: str | None) -> str | None:
+    if not as_connection:
+        return None
+    lowered = as_connection.lower()
+    for hint, dialect in _DIALECT_HINTS.items():
+        if hint in lowered:
+            return dialect
+    return None
+
 
 def _load_all(files: dict[str, str]) -> dict[str, Any]:
     parsed: dict[str, Any] = {
@@ -98,7 +121,24 @@ def parse_sml(files: dict[str, str]) -> dict[str, Any]:
     dimensions = parsed["dimensions"]
     metrics = parsed["metrics"]
     calculations_by_name = parsed["calculations"]
+    connections = parsed["connections"]
     model = parsed["model"] or {}
+
+    # This wizard only ever authors a model against a single connection (one
+    # data source picked in the Data Source panel), so on import just take
+    # whichever connection the first dataset points at - not a per-dataset lookup.
+    first_dataset = next(iter(datasets.values()), None)
+    connection = connections.get(first_dataset.get("connection_id")) if first_dataset else None
+    source_schema = connection.get("schema", "") if connection else ""
+    source = (
+        {
+            "connectionId": connection.get("as_connection"),
+            "database": connection.get("database"),
+            "dialect": _guess_dialect(connection.get("as_connection")),
+        }
+        if connection
+        else None
+    )
 
     # -- classify each dataset: fact (backs a metric), dimension (backs a
     # non-degenerate dimension's level_attributes), or unused --
@@ -129,7 +169,7 @@ def parse_sml(files: dict[str, str]) -> dict[str, Any]:
         row = seq // 3
         node: dict[str, Any] = {
             "id": node_id,
-            "schema": "",
+            "schema": source_schema,
             "table": dataset_name,
             "columns": [{"name": c["name"], "type": c.get("data_type", "string")} for c in ds.get("columns", [])],
             "x": 40 + col * 320,
@@ -334,7 +374,7 @@ def parse_sml(files: dict[str, str]) -> dict[str, Any]:
         for i, calc in enumerate(calculations_by_name.values())
     ]
 
-    return {"nodes": nodes, "joins": joins, "cfg": cfg, "calculations": calculations}
+    return {"nodes": nodes, "joins": joins, "cfg": cfg, "calculations": calculations, "source": source}
 
 
 def _dedupe_joins(joins: list[dict]) -> list[dict]:

@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import {
+  fetchSources,
   generateSml,
   importSmlGit,
   importSmlPath,
   saveSmlToPath,
   SmlValidationFailure,
+  type ImportedModel,
 } from '../api/client'
 import { useModelStore } from '../store/modelStore'
 
@@ -36,6 +38,30 @@ export function ManageModelModal({ onClose }: Props) {
   const cfg = useModelStore((s) => s.cfg)
   const calculations = useModelStore((s) => s.calculations)
   const loadModelData = useModelStore((s) => s.loadModelData)
+  const setSourceId = useModelStore((s) => s.setSourceId)
+
+  // The imported SML names its connection by AtScale's `as_connection` value,
+  // not by the registered source's connectionId, and its database can be a
+  // placeholder (real sample repos ship with "<YOUR DATABASE>") - so try to
+  // match it against this session's actual registered sources first, and
+  // only fall back to the guessed values (dialect included) if nothing matches.
+  // setSourceId always clears nodes/joins/cfg/calculations, so this must run
+  // *before* loadModelData, never after.
+  async function applyImportedSource(source: ImportedModel['source']) {
+    if (!source) return
+    const sources = await fetchSources().catch(() => [])
+    const match = sources.find(
+      (s) =>
+        source.connectionId &&
+        s.connectionId.toLowerCase() === source.connectionId.toLowerCase() &&
+        (!source.database || s.database.toLowerCase() === source.database.toLowerCase()),
+    )
+    setSourceId(match?.id ?? null, {
+      dialect: match?.dialect ?? source.dialect,
+      connectionId: match?.connectionId ?? source.connectionId ?? '',
+      database: match?.database ?? source.database ?? '',
+    })
+  }
 
   async function handleSave() {
     if (!sourceMeta) {
@@ -91,6 +117,7 @@ export function ManageModelModal({ onClose }: Props) {
     setError(null)
     try {
       const result = await importSmlPath(importPath.trim())
+      await applyImportedSource(result.source)
       loadModelData({
         nodes: result.nodes as never[],
         joins: result.joins as never[],
@@ -110,6 +137,7 @@ export function ManageModelModal({ onClose }: Props) {
     setError(null)
     try {
       const result = await importSmlGit({ repoUrl: gitRepoUrl.trim() || undefined, branch: gitBranch.trim() })
+      await applyImportedSource(result.source)
       loadModelData({
         nodes: result.nodes as never[],
         joins: result.joins as never[],

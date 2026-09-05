@@ -9,6 +9,7 @@ export function SourcePanel() {
   const [error, setError] = useState<string | null>(null)
 
   const sourceId = useModelStore((s) => s.sourceId)
+  const sourceMeta = useModelStore((s) => s.sourceMeta)
   const setSourceId = useModelStore((s) => s.setSourceId)
   const search = useModelStore((s) => s.search)
   const setSearch = useModelStore((s) => s.setSearch)
@@ -78,6 +79,12 @@ export function SourcePanel() {
       {selectedSource && (
         <div className="source-meta">
           {selectedSource.dialect?.toUpperCase()} · {selectedSource.database}
+        </div>
+      )}
+      {!selectedSource && sourceMeta && (
+        <div className="source-meta">
+          {sourceMeta.dialect?.toUpperCase() || 'UNKNOWN DIALECT'} · {sourceMeta.database} (from imported SML - pick
+          the matching registered source above to browse its schema)
         </div>
       )}
 

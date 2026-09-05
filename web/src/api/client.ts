@@ -155,11 +155,18 @@ export function validateSml(files: SmlFile[]) {
   })
 }
 
+export interface ImportedSource {
+  connectionId: string | null
+  database: string | null
+  dialect: string | null
+}
+
 export interface ImportedModel {
   nodes: unknown[]
   joins: unknown[]
   cfg: Record<string, unknown>
   calculations?: unknown[]
+  source?: ImportedSource | null
 }
 
 export function importSmlPath(path: string) {
