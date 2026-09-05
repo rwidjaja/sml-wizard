@@ -203,7 +203,20 @@ def parse_sml(files: dict[str, str]) -> dict[str, Any]:
 
             for idx, (level_entry, attr, col) in enumerate(resolved_levels):
                 key = f"{node_id}::{col}"
-                cfg[key] = {"dimRole": "level", "levelOrder": idx, "display": attr.get("label"), **_extra_key_display_sort(attr, col)}
+                cfg[key] = {
+                    "dimRole": "level",
+                    "levelOrder": idx,
+                    "display": attr.get("label"),
+                    # "Query name" in the Inspector is this level's SML
+                    # unique_name - level_entry["unique_name"] (not
+                    # attr["unique_name"], which is identical for a real SML
+                    # file since both come from the same object, but the
+                    # hierarchy's own entry is the one build.py treats as
+                    # authoritative) so re-editing an imported model shows
+                    # it instead of a blank field.
+                    "query": level_entry.get("unique_name"),
+                    **_extra_key_display_sort(attr, col),
+                }
 
                 for sec in level_entry.get("secondary_attributes") or []:
                     sec_col = sec.get("name_column") or sec["key_columns"][0]
@@ -212,6 +225,7 @@ def parse_sml(files: dict[str, str]) -> dict[str, Any]:
                         "dimRole": "secondary",
                         "attachToKey": key,
                         "display": sec.get("label"),
+                        "query": sec.get("unique_name"),
                         **_extra_key_display_sort(sec, sec_col),
                     }
 
