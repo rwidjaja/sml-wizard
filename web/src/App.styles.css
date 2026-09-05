@@ -192,6 +192,26 @@
   margin-bottom: 12px;
 }
 
+.link-btn {
+  cursor: pointer;
+  text-decoration: underline;
+  color: var(--as-accent, #6ab0f3);
+}
+
+.source-meta-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 8px;
+  border: 1px solid var(--as-hairline);
+}
+
+.source-meta-edit .field input,
+.source-meta-edit .field select {
+  font-size: 11px;
+}
+
 .source-search {
   width: 100%;
   height: 32px;

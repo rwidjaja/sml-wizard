@@ -116,6 +116,15 @@ export interface ModelState {
   linkDrag: LinkDrag | null
 
   setSourceId: (id: string | null, meta?: SourceMeta | null) => void
+  /** Patches sourceMeta in place (unlike setSourceId, which also clears the
+   *  canvas) - for correcting a connection's dialect/connectionId/database
+   *  by hand, e.g. after importing SML whose connection file had the wrong
+   *  values, without losing the model that was just loaded. */
+  updateSourceMeta: (patch: Partial<SourceMeta>) => void
+  /** This wizard assumes one schema for the whole model (buildPayload reads
+   *  nodes[0].schema) - this corrects it on every node at once, for the same
+   *  "SML had the wrong value" case as updateSourceMeta. */
+  setSchemaForAllNodes: (schema: string) => void
   setSearch: (search: string) => void
   toggleSchema: (schema: string) => void
   addNode: (schema: string, table: string, x: number, y: number, columns?: ColumnMeta[]) => string
@@ -186,6 +195,9 @@ export const useModelStore = create<ModelState>((set, get) => ({
       calculations: [],
       selection: null,
     }),
+  updateSourceMeta: (patch) =>
+    set((s) => ({ sourceMeta: s.sourceMeta ? { ...s.sourceMeta, ...patch } : s.sourceMeta })),
+  setSchemaForAllNodes: (schema) => set((s) => ({ nodes: s.nodes.map((n) => ({ ...n, schema })) })),
   setSearch: (search) => set({ search }),
   toggleSchema: (schema) =>
     set((s) => ({ openSchemas: { ...s.openSchemas, [schema]: !s.openSchemas[schema] } })),

@@ -2,15 +2,20 @@ import { useEffect, useMemo, useState } from 'react'
 import { fetchSchemas, fetchSources, type SchemaEntry, type SourceSummary } from '../api/client'
 import { useModelStore } from '../store/modelStore'
 
+const KNOWN_DIALECTS = ['postgresql', 'snowflake', 'databricks', 'bigquery', 'redshift']
+
 export function SourcePanel() {
   const [sources, setSources] = useState<SourceSummary[]>([])
   const [schemas, setSchemas] = useState<SchemaEntry[]>([])
   const [loadingSchemas, setLoadingSchemas] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [editingConnection, setEditingConnection] = useState(false)
 
   const sourceId = useModelStore((s) => s.sourceId)
   const sourceMeta = useModelStore((s) => s.sourceMeta)
   const setSourceId = useModelStore((s) => s.setSourceId)
+  const updateSourceMeta = useModelStore((s) => s.updateSourceMeta)
+  const setSchemaForAllNodes = useModelStore((s) => s.setSchemaForAllNodes)
   const search = useModelStore((s) => s.search)
   const setSearch = useModelStore((s) => s.setSearch)
   const openSchemas = useModelStore((s) => s.openSchemas)
@@ -76,15 +81,61 @@ export function SourcePanel() {
           </option>
         ))}
       </select>
-      {selectedSource && (
+      {selectedSource && !editingConnection && (
         <div className="source-meta">
-          {selectedSource.dialect?.toUpperCase()} · {selectedSource.database}
+          {selectedSource.dialect?.toUpperCase()} · {selectedSource.database}{' '}
+          <span className="link-btn" onClick={() => setEditingConnection(true)}>
+            Edit
+          </span>
         </div>
       )}
-      {!selectedSource && sourceMeta && (
+      {!selectedSource && sourceMeta && !editingConnection && (
         <div className="source-meta">
-          {sourceMeta.dialect?.toUpperCase() || 'UNKNOWN DIALECT'} · {sourceMeta.database} (from imported SML - pick
-          the matching registered source above to browse its schema)
+          {sourceMeta.dialect?.toUpperCase() || 'UNKNOWN DIALECT'} · {sourceMeta.database} (from imported SML){' '}
+          <span className="link-btn" onClick={() => setEditingConnection(true)}>
+            Edit
+          </span>
+        </div>
+      )}
+
+      {/* Connection details as parsed/matched aren't always right - a wrong
+          value in the SML's own connection file, or a bad guess when nothing
+          matched a registered source, has to be fixable by hand rather than
+          forcing a re-import. */}
+      {sourceMeta && editingConnection && (
+        <div className="source-meta-edit">
+          <label className="field">
+            Connection ID
+            <input
+              value={sourceMeta.connectionId}
+              onChange={(e) => updateSourceMeta({ connectionId: e.target.value })}
+            />
+          </label>
+          <label className="field">
+            Database
+            <input value={sourceMeta.database} onChange={(e) => updateSourceMeta({ database: e.target.value })} />
+          </label>
+          <label className="field">
+            Dialect
+            <select
+              value={sourceMeta.dialect ?? ''}
+              onChange={(e) => updateSourceMeta({ dialect: e.target.value || null })}
+            >
+              <option value="">(unknown)</option>
+              {KNOWN_DIALECTS.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Schema (applies to every table on the canvas)
+            <input value={nodes[0]?.schema ?? ''} onChange={(e) => setSchemaForAllNodes(e.target.value)} />
+          </label>
+          <span className="link-btn" onClick={() => setEditingConnection(false)}>
+            Done
+          </span>
         </div>
       )}
 
