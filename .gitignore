@@ -155,3 +155,6 @@ api/connections.yaml
 
 # Saved model state (local dev persistence, not shared)
 api/.data/
+
+# start.sh logs/pids
+.logs/
