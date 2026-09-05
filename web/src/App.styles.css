@@ -14,6 +14,40 @@
   border-bottom: 1px solid var(--as-hairline);
 }
 
+.app-header-left {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.app-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.app-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--as-muted-56);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.app-tab:hover {
+  color: var(--as-ink);
+}
+
+.app-tab-active {
+  border: 1px solid var(--as-muted-30);
+  color: var(--as-ink);
+  background: var(--as-panel);
+}
+
 .eyebrow {
   font-family: var(--font-mono);
   font-size: 11px;
