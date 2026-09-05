@@ -63,6 +63,15 @@ export interface ColumnConfig {
   /** The column key of the target level, set only when dimRole is 'secondary' | 'alias'.
    *  Resolved dynamically against whatever chain the user actually built. */
   attachToKey?: ColumnKey
+  /** SML lets a level/attribute's key_columns (join/identity), name_column
+   *  (display), and sort_column all be different physical columns - e.g.
+   *  key on `datekey`, display `date_name`. The column the user clicked to
+   *  mark as a level/secondary/alias is the anchor and defaults to serving
+   *  as all three; these name another column on the same table (by column
+   *  name, not a full ColumnKey - always same node) to override one. */
+  keyColumn?: string
+  displayColumn?: string
+  sortColumn?: string
 }
 
 export interface Selection {

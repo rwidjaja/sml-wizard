@@ -60,6 +60,18 @@ def _attached_to(cfg: dict[str, dict], level_key: str, dim_role: str) -> list[di
     return out
 
 
+def _resolve_key_display_sort(config: dict, own_col: str, dialect: str | None) -> tuple[str, str, str | None]:
+    """SML lets key_columns (join/identity), name_column (display), and
+    sort_column all be different physical columns on the same level/attribute
+    (e.g. key on `datekey`, display `date_name`) - `own_col` is the column
+    the user actually clicked to mark as a level/secondary/alias, and
+    key/display/sort each default to it unless overridden in the Inspector."""
+    key_col = cased(config.get("keyColumn") or own_col, dialect)
+    name_col = cased(config.get("displayColumn") or own_col, dialect)
+    sort_col = cased(config["sortColumn"], dialect) if config.get("sortColumn") else None
+    return key_col, name_col, sort_col
+
+
 def _yaml_dump(obj: Any) -> str:
     return yaml.safe_dump(obj, sort_keys=False, default_flow_style=False, allow_unicode=True)
 
@@ -197,9 +209,16 @@ def build_sml(payload: dict[str, Any]) -> dict[str, str]:
         else:
             fact_dim_joins.append(j)
 
+    def level_unique_name(config: dict, column: str) -> str:
+        """`unique_name` for a level/secondary/alias - the "Query name" field
+        overrides it when set, matching how it already overrides a metric's
+        source column; otherwise it's just the clicked column, cased."""
+        query = config.get("query")
+        return cased(query, dialect) if query else cased(column, dialect)
+
     def leaf_level(node_id: str) -> str | None:
         levels = _levels_of(cfg, node_id)
-        return cased(levels[-1]["column"], dialect) if levels else None
+        return level_unique_name(levels[-1]["config"], levels[-1]["column"]) if levels else None
 
     # -- dimensions/<dimName>.yml, one per dimension-role node --
     for n in nodes:
@@ -213,7 +232,7 @@ def build_sml(payload: dict[str, Any]) -> dict[str, str]:
         level_entries = []
         level_attributes = []
         for lv in levels:
-            col = cased(lv["column"], dialect)
+            col = level_unique_name(lv["config"], lv["column"])
             display = lv["config"].get("display") or title_case(lv["column"])
             secondaries = _attached_to(cfg, lv["key"], "secondary")
             aliases = _attached_to(cfg, lv["key"], "alias")
@@ -221,33 +240,37 @@ def build_sml(payload: dict[str, Any]) -> dict[str, str]:
             secondary_attrs = []
             for s in secondaries + aliases:
                 s_col_full = s["key"].split("::", 1)[1]
-                s_col = cased(s_col_full, dialect)
                 s_display = s["config"].get("display") or title_case(s_col_full)
-                secondary_attrs.append(
-                    {
-                        "unique_name": s_col,
-                        "label": s_display,
-                        "contains_unique_names": False,
-                        "dataset": table,
-                        "is_unique_key": False,
-                        "key_columns": [s_col],
-                        "name_column": s_col,
-                    }
-                )
+                s_key_col, s_name_col, s_sort_col = _resolve_key_display_sort(s["config"], s_col_full, dialect)
+                s_attr = {
+                    "unique_name": level_unique_name(s["config"], s_col_full),
+                    "label": s_display,
+                    "contains_unique_names": False,
+                    "dataset": table,
+                    "is_unique_key": False,
+                    "key_columns": [s_key_col],
+                    "name_column": s_name_col,
+                }
+                if s_sort_col:
+                    s_attr["sort_column"] = s_sort_col
+                secondary_attrs.append(s_attr)
 
             level_entry: dict[str, Any] = {"unique_name": col}
             if secondary_attrs:
                 level_entry["secondary_attributes"] = secondary_attrs
             level_entries.append(level_entry)
 
+            key_col, name_col, sort_col = _resolve_key_display_sort(lv["config"], lv["column"], dialect)
             attr: dict[str, Any] = {
                 "unique_name": col,
                 "label": display,
                 "contains_unique_names": False,
                 "dataset": table,
-                "key_columns": [col],
-                "name_column": col,
+                "key_columns": [key_col],
+                "name_column": name_col,
             }
+            if sort_col:
+                attr["sort_column"] = sort_col
             if n.get("isTime"):
                 attr["time_unit"] = lv["config"].get("timeUnit") or lv["column"].lower()
             level_attributes.append(attr)

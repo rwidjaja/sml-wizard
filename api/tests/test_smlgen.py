@@ -8,6 +8,7 @@ repo corrected in this generator's design.
 
 from __future__ import annotations
 
+import copy
 import shutil
 
 import pytest
@@ -160,6 +161,24 @@ def test_build_sml_time_dimension():
     date_dim = yaml.safe_load(files["dimensions/Date.yml"])
     assert date_dim["type"] == "time"
     assert all("time_unit" in a for a in date_dim["level_attributes"])
+
+
+def test_build_sml_key_display_sort_column_overrides():
+    """SML lets key_columns/name_column/sort_column differ from the column
+    the user clicked - e.g. mark `year` as the level, key on `datekey`,
+    display `year_name`. "Query name" overrides the level's unique_name,
+    matching how it already overrides a metric's source column."""
+    payload = copy.deepcopy(PAYLOAD)
+    payload["cfg"]["n2::year"]["query"] = "yr"
+    payload["cfg"]["n2::year"]["keyColumn"] = "datekey"
+    payload["cfg"]["n2::year"]["displayColumn"] = "year_name"
+
+    files = build_sml(payload)
+    date_dim = yaml.safe_load(files["dimensions/Date.yml"])
+    year_attr = next(a for a in date_dim["level_attributes"] if a["unique_name"] == "yr")
+    assert year_attr["key_columns"] == ["datekey"]
+    assert year_attr["name_column"] == "year_name"
+    assert date_dim["hierarchies"][0]["levels"][0]["unique_name"] == "yr"
 
 
 def test_build_sml_catalog_version_is_1_7():

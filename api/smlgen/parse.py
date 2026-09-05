@@ -172,6 +172,27 @@ def parse_sml(files: dict[str, str]) -> dict[str, Any]:
             #     other datasets consuming index slots before being excluded).
             # Filtering first and enumerating the *filtered* list is what
             # keeps the imported levels' L1, L2, ... numbering contiguous.
+            own_columns = {c["name"] for c in (datasets.get(dataset_name) or {}).get("columns") or []}
+
+            def _extra_key_display_sort(attr: dict, anchor_col: str) -> dict:
+                """SML lets key_columns/name_column/sort_column differ (e.g. key
+                `datekey`, display `date_name`) - round-trip an override into
+                keyColumn/displayColumn/sortColumn only when it's a real column
+                on this node and actually differs from the anchor, so re-editing
+                an imported model shows the same override the source SML had
+                (see api/routes: the Inspector's Key/Value column fields)."""
+                extra: dict[str, Any] = {}
+                key_col = (attr.get("key_columns") or [None])[0]
+                if key_col and key_col != anchor_col and key_col in own_columns:
+                    extra["keyColumn"] = key_col
+                name_col = attr.get("name_column")
+                if name_col and name_col != anchor_col and name_col in own_columns:
+                    extra["displayColumn"] = name_col
+                sort_col = attr.get("sort_column")
+                if sort_col and sort_col != anchor_col and sort_col in own_columns:
+                    extra["sortColumn"] = sort_col
+                return extra
+
             resolved_levels = []
             for level_entry in all_levels:
                 attr = level_attrs_by_name.get(level_entry["unique_name"])
@@ -182,12 +203,17 @@ def parse_sml(files: dict[str, str]) -> dict[str, Any]:
 
             for idx, (level_entry, attr, col) in enumerate(resolved_levels):
                 key = f"{node_id}::{col}"
-                cfg[key] = {"dimRole": "level", "levelOrder": idx, "display": attr.get("label")}
+                cfg[key] = {"dimRole": "level", "levelOrder": idx, "display": attr.get("label"), **_extra_key_display_sort(attr, col)}
 
                 for sec in level_entry.get("secondary_attributes") or []:
                     sec_col = sec.get("name_column") or sec["key_columns"][0]
                     sec_key = f"{node_id}::{sec_col}"
-                    cfg[sec_key] = {"dimRole": "secondary", "attachToKey": key, "display": sec.get("label")}
+                    cfg[sec_key] = {
+                        "dimRole": "secondary",
+                        "attachToKey": key,
+                        "display": sec.get("label"),
+                        **_extra_key_display_sort(sec, sec_col),
+                    }
 
         for rel in dim.get("relationships") or []:
             # `type: embedded` (cross-dimension link, `to.dimension` set) is what

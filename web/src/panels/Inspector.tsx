@@ -301,6 +301,46 @@ export function Inspector() {
                   onChange={(e) => setColumnConfig(key, { query: e.target.value })}
                 />
               </label>
+              <label className="field">
+                Key column
+                <select
+                  value={c.keyColumn ?? ''}
+                  onChange={(e) => setColumnConfig(key, { keyColumn: e.target.value || undefined })}
+                >
+                  <option value="">(same as this column — {selection.column})</option>
+                  {node.columns
+                    .filter((col) => col.name !== selection!.column)
+                    .map((col) => (
+                      <option key={col.name} value={col.name}>
+                        {col.name}
+                      </option>
+                    ))}
+                </select>
+                <span className="field-note">
+                  The join/identity column, if different from the one you selected (e.g. a level whose
+                  Display name is "Product Category Level" keys on <code>productcategorykey</code>).
+                </span>
+              </label>
+              <label className="field">
+                Value column
+                <select
+                  value={c.displayColumn ?? ''}
+                  onChange={(e) => setColumnConfig(key, { displayColumn: e.target.value || undefined })}
+                >
+                  <option value="">(same as this column — {selection.column})</option>
+                  {node.columns
+                    .filter((col) => col.name !== selection!.column)
+                    .map((col) => (
+                      <option key={col.name} value={col.name}>
+                        {col.name}
+                      </option>
+                    ))}
+                </select>
+                <span className="field-note">
+                  The column whose value is shown to users, if different (e.g. key on{' '}
+                  <code>productcategorykey</code>, value <code>productcategoryname</code>).
+                </span>
+              </label>
             </div>
           )}
         </>
