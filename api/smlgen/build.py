@@ -98,6 +98,14 @@ def validate_model(nodes: list[dict], joins: list[dict], cfg: dict[str, dict]) -
         levels = _levels_of(cfg, n["id"])
         if not levels:
             errors.append(f"Dimension '{n.get('dimName') or n['table']}' has no hierarchy levels defined.")
+        elif n.get("isTime"):
+            for lv in levels:
+                if not lv["config"].get("timeUnit"):
+                    errors.append(
+                        f"Level '{lv['config'].get('display') or lv['column']}' on time dimension "
+                        f"'{n.get('dimName') or n['table']}' has no time unit set - pick one in the "
+                        "Column Inspector so SML defines this level's time_unit correctly."
+                    )
 
     # Every secondary/alias must point at a level that actually exists on its own node.
     for key, c in cfg.items():
@@ -274,7 +282,9 @@ def build_sml(payload: dict[str, Any]) -> dict[str, str]:
             if sort_col:
                 attr["sort_column"] = sort_col
             if n.get("isTime"):
-                attr["time_unit"] = lv["config"].get("timeUnit") or lv["column"].lower()
+                # validate_model() already rejected a time dimension with any
+                # level missing this, so it's always set by the time we get here.
+                attr["time_unit"] = lv["config"]["timeUnit"]
             level_attributes.append(attr)
 
         # Rule: is_unique_key only when derivable - here, only for a single-level

@@ -7,6 +7,7 @@ available in CI.
 from __future__ import annotations
 
 from atscale.preview import (
+    _attach_role_played_secondary_attributes,
     _is_system_property,
     build_initial_mdx,
     build_sql_query,
@@ -170,6 +171,50 @@ def test_is_system_property():
     assert _is_system_property("KEY12")
     assert not _is_system_property("Product Line")
     assert not _is_system_property("Due year_name")
+
+
+def test_attach_role_played_secondary_attributes():
+    """Confirmed against a real deployed cube (sample-dev-model): a role-played
+    dimension's own MDSCHEMA_LEVELS rows never match its MDSCHEMA_PROPERTIES
+    rows, which are scoped to the hidden base dimension's level names - only
+    the role-play prefix in the property's own name ("Due year_name") ties it
+    back to the "Due Date" dimension's "Due year" level."""
+    dims_out = [
+        {
+            "uniqueName": "[Due Date]",
+            "caption": "Due Date",
+            "hierarchies": [
+                {
+                    "uniqueName": "[Due Date].[Due datecustom_dimension Hierarchy]",
+                    "caption": "Due datecustom_dimension Hierarchy",
+                    "levels": [{"uniqueName": "[Due Date].[...].[Due year]", "caption": "Due year", "secondaryAttributes": []}],
+                }
+            ],
+        },
+        {
+            "uniqueName": "[Order Date]",
+            "caption": "Order Date",
+            "hierarchies": [
+                {
+                    "uniqueName": "[Order Date].[Order datecustom_dimension Hierarchy]",
+                    "caption": "Order datecustom_dimension Hierarchy",
+                    "levels": [{"uniqueName": "[Order Date].[...].[Order year]", "caption": "Order year", "secondaryAttributes": []}],
+                }
+            ],
+        },
+    ]
+    properties = [
+        {"LEVEL_UNIQUE_NAME": "[Date].[datecustom_dimension Hierarchy].[year]", "PROPERTY_NAME": "Due year_name", "PROPERTY_CAPTION": "Due year_name"},
+        {"LEVEL_UNIQUE_NAME": "[Date].[datecustom_dimension Hierarchy].[year]", "PROPERTY_NAME": "Order year_name", "PROPERTY_CAPTION": "Order year_name"},
+        {"LEVEL_UNIQUE_NAME": "[Date].[datecustom_dimension Hierarchy].[year]", "PROPERTY_NAME": "NAME", "PROPERTY_CAPTION": "NAME"},
+    ]
+    # No MDSCHEMA_LEVELS rows for the base "[Date]" dimension, matching the real cube.
+    levels = [{"LEVEL_UNIQUE_NAME": "[Due Date].[...].[Due year]"}, {"LEVEL_UNIQUE_NAME": "[Order Date].[...].[Order year]"}]
+
+    _attach_role_played_secondary_attributes(dims_out, properties, levels)
+
+    assert dims_out[0]["hierarchies"][0]["levels"][0]["secondaryAttributes"] == [{"name": "Due year_name", "caption": "Due year_name"}]
+    assert dims_out[1]["hierarchies"][0]["levels"][0]["secondaryAttributes"] == [{"name": "Order year_name", "caption": "Order year_name"}]
 
 
 def test_parse_sql_result():

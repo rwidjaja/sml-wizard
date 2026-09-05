@@ -260,6 +260,7 @@ def parse_sml(files: dict[str, str]) -> dict[str, Any]:
                     # it instead of a blank field.
                     "query": level_entry.get("unique_name"),
                     **_extra_key_display_sort(attr, col),
+                    **({"timeUnit": attr["time_unit"]} if attr.get("time_unit") else {}),
                 }
 
                 for sec in level_entry.get("secondary_attributes") or []:

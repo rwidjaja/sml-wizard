@@ -6,9 +6,11 @@ import {
   type AggFn,
   type ColumnKey,
   type DimRole,
+  type TimeUnit,
 } from '../store/modelStore'
 
 const AGG_OPTIONS: AggFn[] = ['SUM', 'MIN', 'MAX', 'COUNT', 'COUNT DISTINCT', 'AVG']
+const TIME_UNIT_OPTIONS: TimeUnit[] = ['year', 'halfyear', 'quarter', 'month', 'week', 'day']
 
 function titleCase(s: string) {
   return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
@@ -341,6 +343,26 @@ export function Inspector() {
                   <code>productcategorykey</code>, value <code>productcategoryname</code>).
                 </span>
               </label>
+              {node.isTime && c.dimRole === 'level' && (
+                <label className="field">
+                  Time unit
+                  <select
+                    value={c.timeUnit ?? ''}
+                    onChange={(e) => setColumnConfig(key, { timeUnit: (e.target.value || undefined) as TimeUnit | undefined })}
+                  >
+                    <option value="">Select a time unit…</option>
+                    {TIME_UNIT_OPTIONS.map((u) => (
+                      <option key={u} value={u}>
+                        {u === 'halfyear' ? 'Half-year' : u[0].toUpperCase() + u.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="field-note">
+                    Required for AtScale to treat this level as a real calendar unit (rollups, time-intelligence
+                    calcs) - without it, the generated SML guesses from the column name, which is often wrong.
+                  </span>
+                </label>
+              )}
             </div>
           )}
         </>
@@ -397,6 +419,7 @@ export function Inspector() {
   function HierarchyReadout({ nodeId, hierName }: { nodeId: string; hierName?: string }) {
     const state = useModelStore.getState()
     const lvls = levelsOf(state, nodeId)
+    const isTime = state.nodes.find((n) => n.id === nodeId)?.isTime ?? false
     if (lvls.length === 0) {
       return null
     }
@@ -438,6 +461,11 @@ export function Inspector() {
                     {l.config.display ?? titleCase(l.column)}
                   </span>
                   <span className="level-source">{l.column}</span>
+                  {isTime && (
+                    <span className={`chip ${l.config.timeUnit ? 'chip-dimension' : 'chip-join'}`}>
+                      {l.config.timeUnit ?? 'NO TIME UNIT'}
+                    </span>
+                  )}
                   <span className="chip chip-level">L{idx + 1}</span>
                 </div>
               </div>

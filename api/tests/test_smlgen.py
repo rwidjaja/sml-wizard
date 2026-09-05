@@ -104,9 +104,9 @@ PAYLOAD = {
     "cfg": {
         "n0::productkey": {"dimRole": "level", "levelOrder": 0, "display": "Product"},
         "n1::productcategorykey": {"dimRole": "level", "levelOrder": 0, "display": "Product Category"},
-        "n2::year": {"dimRole": "level", "levelOrder": 0, "display": "Year"},
-        "n2::quarter": {"dimRole": "level", "levelOrder": 1, "display": "Quarter"},
-        "n2::month": {"dimRole": "level", "levelOrder": 2, "display": "Month"},
+        "n2::year": {"dimRole": "level", "levelOrder": 0, "display": "Year", "timeUnit": "year"},
+        "n2::quarter": {"dimRole": "level", "levelOrder": 1, "display": "Quarter", "timeUnit": "quarter"},
+        "n2::month": {"dimRole": "level", "levelOrder": 2, "display": "Month", "timeUnit": "month"},
         "n2::year_name": {"dimRole": "secondary", "attachToKey": "n2::year", "display": "Year Name"},
         "n2::quarter_name": {"dimRole": "secondary", "attachToKey": "n2::quarter", "display": "Quarter Name"},
         "n2::month_name": {"dimRole": "secondary", "attachToKey": "n2::month", "display": "Month Name"},
@@ -161,6 +161,18 @@ def test_build_sml_time_dimension():
     date_dim = yaml.safe_load(files["dimensions/Date.yml"])
     assert date_dim["type"] == "time"
     assert all("time_unit" in a for a in date_dim["level_attributes"])
+    year_attr = next(a for a in date_dim["level_attributes"] if a["unique_name"] == "year")
+    assert year_attr["time_unit"] == "year"
+
+
+def test_time_dimension_level_missing_time_unit_is_an_error():
+    """A wrong guess from the column name (e.g. a level literally named "yr")
+    produces a time_unit SML rejects - so unlike every other config field this
+    one must be picked explicitly, never inferred."""
+    payload = copy.deepcopy(PAYLOAD)
+    del payload["cfg"]["n2::year"]["timeUnit"]
+    errors = validate_model(payload["nodes"], payload["joins"], payload["cfg"])
+    assert any("time unit" in e for e in errors)
 
 
 def test_build_sml_key_display_sort_column_overrides():
@@ -262,5 +274,6 @@ def test_parse_sml_round_trips_build_sml_output():
     levels = [v for k, v in result["cfg"].items() if k.startswith(f"{date_node_id}::") and v.get("dimRole") == "level"]
     levels.sort(key=lambda v: v["levelOrder"])
     assert [v["levelOrder"] for v in levels] == [0, 1, 2]
+    assert [v["timeUnit"] for v in levels] == ["year", "quarter", "month"]
     secondaries = [v for v in result["cfg"].values() if v.get("dimRole") == "secondary"]
     assert len(secondaries) == 3

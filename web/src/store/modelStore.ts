@@ -6,6 +6,10 @@ import { create } from 'zustand'
 export type Role = 'fact' | 'dimension' | null
 export type AggFn = 'SUM' | 'MIN' | 'MAX' | 'COUNT' | 'COUNT DISTINCT' | 'AVG'
 export type DimRole = 'none' | 'level' | 'secondary' | 'alias'
+//: SML's exact time_unit enum (lowercase, singular) - confirmed against real
+//: SML repos (sample-dev/dimensions/Date.yml, sales-insights-postgres/
+//: dimensions/Date Dimension.yml): year/halfyear/quarter/month/week/day.
+export type TimeUnit = 'year' | 'halfyear' | 'quarter' | 'month' | 'week' | 'day'
 
 export interface ColumnMeta {
   name: string
@@ -72,6 +76,12 @@ export interface ColumnConfig {
   keyColumn?: string
   displayColumn?: string
   sortColumn?: string
+  /** SML's level_attributes.time_unit, set only on a `level` (never
+   *  secondary/alias) inside a table marked isTime - required for AtScale to
+   *  treat the level as a real calendar unit (rollups, time-intelligence
+   *  calcs) rather than an opaque string. Without it build.py falls back to
+   *  guessing from the column's own name, which is often wrong. */
+  timeUnit?: TimeUnit
 }
 
 export interface Selection {

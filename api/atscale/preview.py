@@ -431,6 +431,49 @@ def list_catalogs_and_cubes(client: AtScaleClient) -> list[dict[str, str | None]
     return out
 
 
+def _attach_role_played_secondary_attributes(
+    dims_out: list[dict[str, Any]], properties: list[dict[str, Any]], levels: list[dict[str, Any]]
+) -> None:
+    """A role-played dimension (e.g. "Due Date"/"Order Date", both aliases of
+    one hidden base "Date" dimension) has its secondary attributes registered
+    by MDSCHEMA_PROPERTIES under the BASE dimension's hierarchy/level names,
+    never the role-played alias - so the exact LEVEL_UNIQUE_NAME match in
+    load_cube_metadata finds nothing for these. Confirmed against a real
+    deployed cube: MDSCHEMA_LEVELS has no rows for "[Date]" at all, only for
+    "[Due Date]"/"[Order Date]", yet MDSCHEMA_PROPERTIES returns "Due
+    year_name"/"Order year_name" both scoped to the same base level
+    "[Date].[...].[year]" - the role-play prefix survives only in the
+    property's own name. Reconciles by that prefix: if a property's name
+    starts with "<word> " where "<word>" is also a role-played dimension's
+    first caption word, and stripping that same prefix from one of that
+    dimension's own level captions matches the property's own level's
+    trailing bracket segment, attach it there.
+    """
+    known_level_names = {lv["LEVEL_UNIQUE_NAME"] for lv in levels}
+    orphans = [p for p in properties if p.get("LEVEL_UNIQUE_NAME") not in known_level_names]
+    if not orphans:
+        return
+
+    for p in orphans:
+        name = p.get("PROPERTY_NAME")
+        base_level_unique_name = p.get("LEVEL_UNIQUE_NAME")
+        if not name or _is_system_property(name) or not base_level_unique_name:
+            continue
+        base_level_name = base_level_unique_name.rsplit(".", 1)[-1].strip("[]")
+
+        for dim in dims_out:
+            prefix = dim["caption"].split(" ", 1)[0] + " "
+            if not name.startswith(prefix):
+                continue
+            for hier in dim["hierarchies"]:
+                for lvl in hier["levels"]:
+                    if lvl["caption"].startswith(prefix) and lvl["caption"][len(prefix):] == base_level_name:
+                        lvl["secondaryAttributes"].append(
+                            {"name": name, "caption": p.get("PROPERTY_CAPTION") or name}
+                        )
+                        break
+
+
 def load_cube_metadata(client: AtScaleClient, catalog: str, cube: str) -> dict[str, Any]:
     dimensions = parse_rows(
         client.run_xmla(DIMENSIONS_QUERY.format(catalog=catalog, cube_name=cube)),
@@ -493,6 +536,8 @@ def load_cube_metadata(client: AtScaleClient, catalog: str, cube: str) -> dict[s
                 }
             )
         dims_out.append({"uniqueName": dim_name, "caption": dim.get("DIMENSION_CAPTION") or dim_name, "hierarchies": hiers_out})
+
+    _attach_role_played_secondary_attributes(dims_out, properties, levels)
 
     measures_by_folder: dict[str, list[dict]] = {}
     for m in measures:
