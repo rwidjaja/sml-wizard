@@ -119,6 +119,15 @@ export function Canvas() {
     }
   }
 
+  // The join SVG clips anything outside its own width/height (the SVG spec's
+  // default overflow:hidden on the root element) - a fixed 2000x1400 world
+  // silently dropped every join line touching a node that Auto-arrange (or a
+  // manual drag) placed further out, since a tall node like a Date dimension
+  // can push whatever's stacked below it well past that. Size the world to
+  // whatever the nodes actually need instead of a constant.
+  const worldW = Math.max(WORLD_W, ...nodes.map((n) => n.x + NODE_W + 100))
+  const worldH = Math.max(WORLD_H, ...nodes.map((n) => n.y + HEADER_H + n.columns.length * ROW_H + 100))
+
   return (
     <main
       className="panel-center"
@@ -150,11 +159,9 @@ export function Canvas() {
           <button className="btn btn-ghost zoom-btn" onClick={() => zoomBy(ZOOM_STEP)} disabled={zoom >= ZOOM_MAX}>
             +
           </button>
-          {zoom !== 1 && (
-            <button className="btn btn-ghost zoom-btn" onClick={() => setZoom(1)}>
-              Reset
-            </button>
-          )}
+          <button className="btn btn-ghost zoom-btn" onClick={() => setZoom(1)} disabled={zoom === 1}>
+            Reset
+          </button>
           <button className="btn btn-ghost zoom-btn" onClick={autoArrange} disabled={nodes.length === 0}>
             Auto-arrange
           </button>
@@ -169,17 +176,17 @@ export function Canvas() {
         className="canvas-world"
         style={{
           position: 'relative',
-          width: WORLD_W,
-          height: WORLD_H,
+          width: worldW,
+          height: worldH,
           transform: `scale(${zoom})`,
           transformOrigin: '0 0',
         }}
       >
       <svg
         className="join-svg"
-        width={WORLD_W}
-        height={WORLD_H}
-        style={{ position: 'absolute', top: 0, left: 0, width: WORLD_W, height: WORLD_H, pointerEvents: 'none' }}
+        width={worldW}
+        height={worldH}
+        style={{ position: 'absolute', top: 0, left: 0, width: worldW, height: worldH, pointerEvents: 'none' }}
       >
         {joins.map((j: Join) => {
           const a = nodes.find((n) => n.id === j.a.node)
