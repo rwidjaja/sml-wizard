@@ -867,3 +867,113 @@
   white-space: pre-wrap;
   margin: 0;
 }
+
+/* -- Preview tab -- */
+.preview-listbox {
+  border: 1px solid var(--as-hairline);
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--as-panel);
+}
+
+.preview-listbox-header {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 6px 8px;
+  color: var(--as-fact);
+  background: var(--as-list-title);
+}
+
+.preview-listbox-folder {
+  color: var(--as-muted-56);
+}
+
+.preview-listbox-item {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 5px 8px 5px 18px;
+  cursor: grab;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-listbox-item:hover {
+  background: var(--as-hover);
+}
+
+.preview-listbox-hierarchy {
+  padding-left: 8px;
+  color: var(--as-dimension);
+}
+
+.preview-listbox-level {
+  padding-left: 26px;
+}
+
+.preview-dropzone {
+  border: 1px dashed var(--as-muted-30);
+  padding: 10px;
+  min-height: 72px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.preview-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 3px 8px;
+  background: var(--as-row);
+  border: 1px solid var(--as-hairline);
+  width: fit-content;
+}
+
+.preview-chip button {
+  background: none;
+  border: none;
+  color: var(--as-muted-56);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 0;
+}
+
+.preview-results {
+  border: 1px solid var(--as-hairline);
+}
+
+.preview-table {
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  width: 100%;
+}
+
+.preview-table th,
+.preview-table td {
+  border: 1px solid var(--as-hairline);
+  padding: 4px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.preview-table th {
+  background: var(--as-list-title);
+  position: sticky;
+  top: 0;
+}
+
+.preview-log {
+  flex: 0 0 140px;
+  border-top: 1px solid var(--as-hairline);
+  background: var(--as-canvas);
+  overflow-y: auto;
+  padding: 8px 16px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--as-muted-56);
+}

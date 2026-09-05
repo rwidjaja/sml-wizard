@@ -185,3 +185,74 @@ export function saveSmlToPath(path: string, files: SmlFile[]) {
     body: JSON.stringify({ path, files }),
   })
 }
+
+// -- Cube data preview (Preview tab) -----------------------------------------
+
+export interface CatalogCube {
+  catalog: string
+  catalogGuid: string | null
+  cube: string
+  cubeGuid: string | null
+}
+
+export function fetchPreviewCatalogs() {
+  return request<CatalogCube[]>('/preview/catalogs')
+}
+
+export interface PreviewLevel {
+  uniqueName: string
+  caption: string
+}
+
+export interface PreviewHierarchy {
+  uniqueName: string
+  caption: string
+  levels: PreviewLevel[]
+}
+
+export interface PreviewDimension {
+  uniqueName: string
+  caption: string
+  hierarchies: PreviewHierarchy[]
+}
+
+export interface PreviewMeasureItem {
+  uniqueName: string
+  caption: string
+}
+
+export interface PreviewMeasureFolder {
+  folder: string
+  items: PreviewMeasureItem[]
+}
+
+export interface PreviewMetadata {
+  dimensions: PreviewDimension[]
+  measures: PreviewMeasureFolder[]
+}
+
+export function fetchPreviewMetadata(catalog: string, cube: string) {
+  const qs = `?catalog=${encodeURIComponent(catalog)}&cube=${encodeURIComponent(cube)}`
+  return request<PreviewMetadata>(`/preview/metadata${qs}`)
+}
+
+export interface PreviewQueryPayload {
+  catalog: string
+  cube: string
+  dialect: 'mdx' | 'sql'
+  hierarchies: string[]
+  measures: string[]
+  useAgg?: boolean
+  useCache?: boolean
+}
+
+export interface PreviewQueryResult {
+  columns: string[]
+  rows: (string | null)[][]
+  query: string
+  truncated?: boolean
+}
+
+export function runPreviewQuery(payload: PreviewQueryPayload) {
+  return request<PreviewQueryResult>('/preview/query', { method: 'POST', body: JSON.stringify(payload) })
+}

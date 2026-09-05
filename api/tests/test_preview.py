@@ -1,0 +1,180 @@
+"""Cube data preview parsing/building - hand-built XML fixtures matching the
+shapes AtScale's XMLA and SQL-submit endpoints actually return (per the user's
+PythonAtscaleUtility reference tool), since there's no live AtScale instance
+available in CI.
+"""
+
+from __future__ import annotations
+
+from atscale.preview import (
+    build_initial_mdx,
+    build_sql_query,
+    extract_sql_column_name,
+    parse_catalogs,
+    parse_cubes,
+    parse_rows,
+    parse_sql_result,
+    parse_xmla_result,
+)
+
+ROWSET_ENVELOPE = """<?xml version="1.0"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <ExecuteResponse xmlns="urn:schemas-microsoft-com:xml-analysis">
+      <return>
+        <root xmlns:rowset="urn:schemas-microsoft-com:xml-analysis:rowset">
+          {rows}
+        </root>
+      </return>
+    </ExecuteResponse>
+  </soap:Body>
+</soap:Envelope>"""
+
+
+def test_parse_catalogs():
+    xml = ROWSET_ENVELOPE.format(
+        rows="""
+        <rowset:row>
+          <rowset:CATALOG_NAME>sample_dev</rowset:CATALOG_NAME>
+          <rowset:CATALOG_GUID>guid-1</rowset:CATALOG_GUID>
+        </rowset:row>
+        """
+    )
+    catalogs = parse_catalogs(xml)
+    assert catalogs == [{"name": "sample_dev", "guid": "guid-1"}]
+
+
+def test_parse_cubes():
+    xml = ROWSET_ENVELOPE.format(
+        rows="""
+        <rowset:row>
+          <rowset:CUBE_NAME>Internet Sales Cube</rowset:CUBE_NAME>
+          <rowset:CUBE_GUID>guid-2</rowset:CUBE_GUID>
+        </rowset:row>
+        """
+    )
+    cubes = parse_cubes(xml)
+    assert cubes == [{"name": "Internet Sales Cube", "guid": "guid-2"}]
+
+
+def test_parse_rows_dimensions():
+    xml = ROWSET_ENVELOPE.format(
+        rows="""
+        <rowset:row>
+          <rowset:DIMENSION_UNIQUE_NAME>[Product Dimension]</rowset:DIMENSION_UNIQUE_NAME>
+          <rowset:DIMENSION_CAPTION>Product Dimension</rowset:DIMENSION_CAPTION>
+          <rowset:DEFAULT_HIERARCHY>[Product Dimension].[Product Hierarchy]</rowset:DEFAULT_HIERARCHY>
+        </rowset:row>
+        """
+    )
+    rows = parse_rows(xml, ["DIMENSION_UNIQUE_NAME", "DIMENSION_CAPTION", "DEFAULT_HIERARCHY"])
+    assert rows == [
+        {
+            "DIMENSION_UNIQUE_NAME": "[Product Dimension]",
+            "DIMENSION_CAPTION": "Product Dimension",
+            "DEFAULT_HIERARCHY": "[Product Dimension].[Product Hierarchy]",
+        }
+    ]
+
+
+def test_extract_sql_column_name():
+    assert extract_sql_column_name("[Measures].[salesamount1]") == "salesamount1"
+    assert extract_sql_column_name("[Product Dimension].[Product Hierarchy].[Product Name]") == "Product Name"
+    assert extract_sql_column_name("plain_column") == "plain_column"
+
+
+def test_build_sql_query():
+    sql = build_sql_query(
+        ["[Product Dimension].[Product Hierarchy].[Product Name]"],
+        ["[Measures].[salesamount1]"],
+        "Internet Sales Cube",
+    )
+    assert "`Internet Sales Cube`.`Product Name` AS `Product Name`" in sql
+    assert "`salesamount1`" in sql
+    assert "GROUP BY 1" in sql
+
+
+def test_build_initial_mdx_single_hierarchy():
+    levels = [
+        {"HIERARCHY_UNIQUE_NAME": "[Product Dimension].[Product Hierarchy]", "LEVEL_UNIQUE_NAME": "[Product Dimension].[Product Hierarchy].[Product Line]", "LEVEL_NUMBER": "1"},
+        {"HIERARCHY_UNIQUE_NAME": "[Product Dimension].[Product Hierarchy]", "LEVEL_UNIQUE_NAME": "[Product Dimension].[Product Hierarchy].[Product Name]", "LEVEL_NUMBER": "2"},
+    ]
+    mdx = build_initial_mdx(
+        ["[Product Dimension].[Product Hierarchy]"], ["[Measures].[salesamount1]"], "Internet Sales Cube", levels
+    )
+    # Picks the first (lowest LEVEL_NUMBER) level, not just whichever came first in the list.
+    assert "[Product Dimension].[Product Hierarchy].[Product Line].Members" in mdx
+    assert "[Measures].[salesamount1]" in mdx
+    assert "FROM [Internet Sales Cube]" in mdx
+
+
+def test_build_initial_mdx_multiple_hierarchies_crossjoin():
+    levels = [
+        {"HIERARCHY_UNIQUE_NAME": "[Date Dimension].[Calendar]", "LEVEL_UNIQUE_NAME": "[Date Dimension].[Calendar].[Year]", "LEVEL_NUMBER": "1"},
+        {"HIERARCHY_UNIQUE_NAME": "[Product Dimension].[Product Hierarchy]", "LEVEL_UNIQUE_NAME": "[Product Dimension].[Product Hierarchy].[Product Line]", "LEVEL_NUMBER": "1"},
+    ]
+    mdx = build_initial_mdx(
+        ["[Date Dimension].[Calendar]", "[Product Dimension].[Product Hierarchy]"],
+        ["[Measures].[salesamount1]"],
+        "Internet Sales Cube",
+        levels,
+    )
+    assert mdx.count("CrossJoin(") == 1
+    assert "[Date Dimension].[Calendar].[Year].Members" in mdx
+    assert "[Product Dimension].[Product Hierarchy].[Product Line].Members" in mdx
+
+
+def test_parse_xmla_result():
+    xml = """<?xml version="1.0"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <ExecuteResponse xmlns="urn:schemas-microsoft-com:xml-analysis">
+      <return>
+        <root xmlns="urn:schemas-microsoft-com:xml-analysis:mddataset">
+          <Axis name="Axis0">
+            <Tuple>
+              <Member><Caption>Sales Amount</Caption></Member>
+            </Tuple>
+          </Axis>
+          <Axis name="Axis1">
+            <Tuple>
+              <Member><Caption>Bikes</Caption></Member>
+            </Tuple>
+            <Tuple>
+              <Member><Caption>Accessories</Caption></Member>
+            </Tuple>
+          </Axis>
+          <CellData>
+            <Cell><Value>100</Value></Cell>
+            <Cell><Value>200</Value></Cell>
+          </CellData>
+        </root>
+      </return>
+    </ExecuteResponse>
+  </soap:Body>
+</soap:Envelope>"""
+    result = parse_xmla_result(xml)
+    assert result["columns"] == ["Row Labels", "Sales Amount"]
+    assert result["rows"] == [["Bikes", "100"], ["Accessories", "200"]]
+
+
+def test_parse_sql_result():
+    xml = """<result>
+  <columns>
+    <column><name>Product Name</name></column>
+    <column><name>salesamount1</name></column>
+  </columns>
+  <data>
+    <row>
+      <column>Bikes</column>
+      <column>1234.5</column>
+    </row>
+    <row>
+      <column>Accessories</column>
+      <column null="true"></column>
+    </row>
+  </data>
+</result>"""
+    result = parse_sql_result(xml)
+    assert result["columns"] == ["Product Name", "salesamount1"]
+    assert result["rows"] == [["Bikes", "1234.5"], ["Accessories", None]]

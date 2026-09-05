@@ -296,3 +296,16 @@ class AtScaleClient:
         }
         resp = self._dispatch("POST", "/wapi/git/deploy/catalog", json=body)
         return resp.json() if resp.text else {}
+
+    # -- cube data preview (MDX/XMLA + SQL query engine) ------------------------------
+    # Same bearer-JWT session as every /wapi/p/* call above - the container-mode
+    # AtScale deployment this wizard targets proxies both the XMLA and query/submit
+    # engines through the main host (no separate :10502 port or Basic-auth XMLA
+    # login, unlike the installer-mode pattern some standalone AtScale tools use).
+    def run_xmla(self, xml_body: str) -> str:
+        return self._dispatch(
+            "POST", "/engine/xmla", data=xml_body.encode("utf-8"), headers={"Content-Type": "text/xml"}
+        ).text
+
+    def submit_query(self, payload: dict[str, Any]) -> str:
+        return self._dispatch("POST", "/engine/query/submit", json=payload).text

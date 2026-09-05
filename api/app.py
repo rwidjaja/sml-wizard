@@ -4,6 +4,7 @@ from flask import Flask
 from flask_cors import CORS
 
 from config import load_config
+from routes.preview import preview_bp
 from routes.publish import publish_bp
 from routes.session import connections_bp, session_bp
 from routes.sml import sml_bp
@@ -22,6 +23,7 @@ def create_app() -> Flask:
     app.register_blueprint(sources_bp, url_prefix="/api")
     app.register_blueprint(sml_bp, url_prefix="/api")
     app.register_blueprint(publish_bp, url_prefix="/api")
+    app.register_blueprint(preview_bp, url_prefix="/api")
 
     @app.get("/api/health")
     def health():
