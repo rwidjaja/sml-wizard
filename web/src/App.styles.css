@@ -630,6 +630,14 @@
   font-size: 12.5px;
   font-weight: 600;
   color: var(--as-ink-strong);
+  overflow: hidden;
+}
+
+.hierarchy-title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .hierarchy-glyph {
@@ -690,6 +698,10 @@
   flex: 1;
   font-size: 12.5px;
   color: var(--as-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .level-source {

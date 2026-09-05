@@ -368,7 +368,9 @@ export function Inspector() {
             <span />
             <span />
           </span>
-          {factName || 'Untitled Fact Dataset'}
+          <span className="hierarchy-title-text" title={factName || 'Untitled Fact Dataset'}>
+            {factName || 'Untitled Fact Dataset'}
+          </span>
         </div>
         {metrics.map(([k, c]) => (
           <div key={k} className="metric-row">
@@ -407,7 +409,9 @@ export function Inspector() {
             <span />
             <span />
           </span>
-          {hierName || 'Untitled Hierarchy'}
+          <span className="hierarchy-title-text" title={hierName || 'Untitled Hierarchy'}>
+            {hierName || 'Untitled Hierarchy'}
+          </span>
         </div>
         {lvls.map((l, idx) => {
           const secs = secondariesOf(state, l.key)
@@ -430,7 +434,9 @@ export function Inspector() {
                     ▼
                   </button>
                   <span className="level-arrow">↳</span>
-                  <span className="level-name">{l.config.display ?? titleCase(l.column)}</span>
+                  <span className="level-name" title={l.config.display ?? titleCase(l.column)}>
+                    {l.config.display ?? titleCase(l.column)}
+                  </span>
                   <span className="level-source">{l.column}</span>
                   <span className="chip chip-level">L{idx + 1}</span>
                 </div>

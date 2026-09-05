@@ -30,6 +30,7 @@ export function Canvas() {
   const select = useModelStore((s) => s.select)
   const addNode = useModelStore((s) => s.addNode)
   const moveNode = useModelStore((s) => s.moveNode)
+  const autoArrange = useModelStore((s) => s.autoArrange)
   const removeNode = useModelStore((s) => s.removeNode)
   const addJoin = useModelStore((s) => s.addJoin)
   const removeJoin = useModelStore((s) => s.removeJoin)
@@ -154,6 +155,9 @@ export function Canvas() {
               Reset
             </button>
           )}
+          <button className="btn btn-ghost zoom-btn" onClick={autoArrange} disabled={nodes.length === 0}>
+            Auto-arrange
+          </button>
         </div>
       </div>
       {nodes.length === 0 && (

@@ -128,6 +128,14 @@ export interface ModelState {
   toggleSchema: (schema: string) => void
   addNode: (schema: string, table: string, x: number, y: number, columns?: ColumnMeta[]) => string
   moveNode: (id: string, x: number, y: number) => void
+  /** Re-lays-out every node: fact tables in the leftmost column, then their
+   *  directly-joined dimensions, then dimensions reached only through a
+   *  snowflake join to another dimension, and so on outward by join
+   *  distance - anything unreachable from a fact goes in a trailing column.
+   *  Rows within a column are spaced by each node's actual rendered height
+   *  (not a fixed slot), since that fixed-slot grid is exactly what made a
+   *  many-column node overlap its neighbor after import. */
+  autoArrange: () => void
   removeNode: (id: string) => void
   setNodeRole: (id: string, role: Role) => void
   setNodeField: (id: string, field: 'dimName' | 'hierName' | 'factName', value: string) => void
@@ -156,6 +164,63 @@ export interface ModelState {
 }
 
 const columnKey = (nodeId: string, column: string): ColumnKey => `${nodeId}::${column}`
+
+// Mirrors Canvas.tsx's own node geometry (NODE_W/HEADER_H/ROW_H) - kept here
+// too since autoArrange needs each node's actual rendered height to space
+// rows without overlap, and the store can't import from a panel component.
+const LAYOUT_NODE_W = 258
+const LAYOUT_HEADER_H = 44
+const LAYOUT_ROW_H = 24
+const LAYOUT_COL_GAP = 60
+const LAYOUT_ROW_GAP = 40
+const LAYOUT_MARGIN = 40
+
+function nodeHeight(n: Node): number {
+  return LAYOUT_HEADER_H + n.columns.length * LAYOUT_ROW_H
+}
+
+/** Layers every node by join-distance from the nearest fact table (facts are
+ *  layer 0), so a snowflaked dim-of-a-dim lands further out than the dims a
+ *  fact joins directly - anything unreachable from any fact (a table with no
+ *  joins yet, or an island) goes in one trailing layer rather than blocking
+ *  the rest of the layout. */
+function layerNodes(nodes: Node[], joins: Join[]): Node[][] {
+  const adjacency = new Map<string, string[]>()
+  for (const n of nodes) adjacency.set(n.id, [])
+  for (const j of joins) {
+    adjacency.get(j.a.node)?.push(j.b.node)
+    adjacency.get(j.b.node)?.push(j.a.node)
+  }
+
+  const layerOf = new Map<string, number>()
+  const queue: string[] = []
+  for (const n of nodes) {
+    if (n.role === 'fact') {
+      layerOf.set(n.id, 0)
+      queue.push(n.id)
+    }
+  }
+  while (queue.length > 0) {
+    const id = queue.shift()!
+    const layer = layerOf.get(id)!
+    for (const next of adjacency.get(id) ?? []) {
+      if (!layerOf.has(next)) {
+        layerOf.set(next, layer + 1)
+        queue.push(next)
+      }
+    }
+  }
+
+  const maxLayer = Math.max(0, ...layerOf.values())
+  const orphanLayer = maxLayer + 1
+  const layers: Node[][] = []
+  for (const n of nodes) {
+    const layer = layerOf.get(n.id) ?? orphanLayer
+    layers[layer] = layers[layer] ?? []
+    layers[layer].push(n)
+  }
+  return layers.filter(Boolean)
+}
 
 /** Auto-seeded names for a role, derived from the table name (strip dim_/fact_/fct_
  *  prefix, title-case). Shared by addNode's initial role guess and setNodeRole's
@@ -212,6 +277,20 @@ export const useModelStore = create<ModelState>((set, get) => ({
     set((s) => ({
       nodes: s.nodes.map((n) => (n.id === id ? { ...n, x: Math.max(0, x), y: Math.max(0, y) } : n)),
     })),
+
+  autoArrange: () =>
+    set((s) => {
+      const layers = layerNodes(s.nodes, s.joins)
+      const positioned = new Map<string, { x: number; y: number }>()
+      layers.forEach((layer, layerIdx) => {
+        let y = LAYOUT_MARGIN
+        for (const n of layer) {
+          positioned.set(n.id, { x: LAYOUT_MARGIN + layerIdx * (LAYOUT_NODE_W + LAYOUT_COL_GAP), y })
+          y += nodeHeight(n) + LAYOUT_ROW_GAP
+        }
+      })
+      return { nodes: s.nodes.map((n) => ({ ...n, ...(positioned.get(n.id) ?? {}) })) }
+    }),
 
   removeNode: (id) =>
     set((s) => {
