@@ -153,12 +153,8 @@ export function Canvas() {
                 fill="none"
                 stroke={involvesFact ? 'var(--as-join)' : 'var(--as-muted-30)'}
                 strokeWidth={2.5}
-                style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+                style={{ pointerEvents: 'stroke', cursor: involvesFact ? 'pointer' : 'default' }}
                 onClick={(e) => {
-                  e.stopPropagation()
-                  removeJoin(j.id)
-                }}
-                onDoubleClick={(e) => {
                   e.stopPropagation()
                   if (!involvesFact) return
                   const next = window.prompt(
@@ -171,7 +167,7 @@ export function Canvas() {
               {j.rolePlay && (
                 <text
                   x={midX}
-                  y={midY - 6}
+                  y={midY - 10}
                   fill="var(--as-join)"
                   fontSize={10}
                   fontFamily="var(--font-mono)"
@@ -181,6 +177,33 @@ export function Canvas() {
                   {j.rolePlay}
                 </text>
               )}
+              {/* Explicit delete control - clicking the join line itself no longer
+                  deletes it (that surprised users into losing joins by accident
+                  while trying to set a role-play label). */}
+              <circle
+                cx={midX}
+                cy={midY}
+                r={9}
+                fill="var(--as-modal)"
+                stroke="var(--as-join)"
+                strokeWidth={1.5}
+                style={{ cursor: 'pointer' }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  removeJoin(j.id)
+                }}
+              />
+              <text
+                x={midX}
+                y={midY}
+                fill="var(--as-join)"
+                fontSize={11}
+                textAnchor="middle"
+                dominantBaseline="central"
+                style={{ pointerEvents: 'none' }}
+              >
+                ✕
+              </text>
             </g>
           )
         })}

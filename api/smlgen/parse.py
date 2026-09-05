@@ -28,6 +28,19 @@ against two real repos, sample-dev and sales-insights-postgres):
   end up as duplicate-looking joins once resolved to a single {node, column}
   pair, since both hierarchies key off the same underlying column. Exact
   duplicates are deduped below; the extra hierarchy itself is not imported.
+- SML legitimately lets a level's `key_columns` (join/identity - can be
+  composite), `name_column` (display), and `sort_column` differ - this
+  wizard's canvas only tracks one column per level, so a level is resolved
+  by `name_column` (what a user would actually drag onto the canvas and mark
+  as a level), never `key_columns[0]`. Picking `key_columns[0]` used to
+  silently collide two unrelated levels onto the same cfg entry whenever a
+  composite key shared its leading column with a sibling level's single-
+  column key (confirmed in sales-insights-postgres' Product Dimension:
+  "Product Category" is keyed by `[productline, productsubcategorykey]`,
+  "Product Line" by `[productline]` alone) - the loser vanished and the
+  survivor kept its original, now non-contiguous hierarchy position as its
+  levelOrder. `sort_column` isn't tracked at all yet if it differs from
+  `name_column` - a follow-up, not implemented here.
 """
 
 from __future__ import annotations
@@ -127,7 +140,6 @@ def parse_sml(files: dict[str, str]) -> dict[str, Any]:
     join_seq = 0
 
     # -- dimension nodes: levels, secondary attributes, embedded (snowflake) relationships --
-    dim_leaf_col: dict[str, str] = {}  # dimension unique_name -> its leaf level's source column
     for dataset_name, dim in dim_by_dataset.items():
         node_id = node_for_dataset(dataset_name, "dimension")
         nodes[[n["id"] for n in nodes].index(node_id)]["dimName"] = dim["unique_name"]
@@ -137,20 +149,43 @@ def parse_sml(files: dict[str, str]) -> dict[str, Any]:
         hierarchies = dim.get("hierarchies") or []
         if hierarchies:
             nodes[[n["id"] for n in nodes].index(node_id)]["hierName"] = hierarchies[0].get("unique_name")
-            levels = hierarchies[0].get("levels") or []
-            for idx, level_entry in enumerate(levels):
-                level_name = level_entry["unique_name"]
-                attr = level_attrs_by_name.get(level_name)
-                if not attr:
+            all_levels = hierarchies[0].get("levels") or []
+
+            # Two things must be true for a level to import onto this node:
+            #  1. its level_attribute must actually live on this node's own
+            #     dataset - a level backed by a *different* dataset (the
+            #     multi-dataset-snowflake pattern, e.g. Geography Dimension's
+            #     Country/State levels living on separate tables from the City
+            #     level) can't be represented by this wizard's one-node-per-
+            #     table model, so it's excluded rather than mis-numbered in.
+            #  2. its resolved column must be `name_column`, not
+            #     `key_columns[0]` - a level with a *composite* key
+            #     (key_columns: [productline, productsubcategorykey]) shares
+            #     its first key column with a sibling single-column level
+            #     (key_columns: [productline]), and picking key_columns[0]
+            #     made two unrelated levels collide onto the same cfg key,
+            #     silently dropping one and leaving the surviving level's
+            #     original (non-contiguous) hierarchy position as its
+            #     levelOrder - confirmed against sales-insights-postgres'
+            #     Product Dimension (Product Line vs Product Category both
+            #     keyed by `productline`) and Geography Dimension (levels on
+            #     other datasets consuming index slots before being excluded).
+            # Filtering first and enumerating the *filtered* list is what
+            # keeps the imported levels' L1, L2, ... numbering contiguous.
+            resolved_levels = []
+            for level_entry in all_levels:
+                attr = level_attrs_by_name.get(level_entry["unique_name"])
+                if not attr or attr.get("dataset") != dataset_name:
                     continue
-                col = attr["key_columns"][0]
+                col = attr.get("name_column") or attr["key_columns"][0]
+                resolved_levels.append((level_entry, attr, col))
+
+            for idx, (level_entry, attr, col) in enumerate(resolved_levels):
                 key = f"{node_id}::{col}"
                 cfg[key] = {"dimRole": "level", "levelOrder": idx, "display": attr.get("label")}
-                if idx == len(levels) - 1:
-                    dim_leaf_col[dim["unique_name"]] = col
 
                 for sec in level_entry.get("secondary_attributes") or []:
-                    sec_col = sec["key_columns"][0]
+                    sec_col = sec.get("name_column") or sec["key_columns"][0]
                     sec_key = f"{node_id}::{sec_col}"
                     cfg[sec_key] = {"dimRole": "secondary", "attachToKey": key, "display": sec.get("label")}
 
