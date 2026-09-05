@@ -33,7 +33,7 @@ export function Inspector() {
   if (!node) {
     return (
       <aside className="panel-right">
-        <div className="section-label">03 — Column Inspector</div>
+        <div className="section-label">Column Inspector</div>
         <div style={{ color: 'var(--as-muted)' }}>No selection</div>
       </aside>
     )
@@ -47,7 +47,7 @@ export function Inspector() {
     return (
       <aside className="panel-right">
         <div className="section-label">
-          03 — Column Inspector <span className="status-word">{node.role ? node.role.toUpperCase() : 'ROLE NOT SET'}</span>
+          Column Inspector <span className="status-word">{node.role ? node.role.toUpperCase() : 'ROLE NOT SET'}</span>
         </div>
 
         <div className="identity-path">
@@ -139,7 +139,7 @@ export function Inspector() {
   return (
     <aside className="panel-right">
       <div className="section-label">
-        03 — Column Inspector <span className="status-word">{node.role ? node.role.toUpperCase() : 'ROLE NOT SET'}</span>
+        Column Inspector <span className="status-word">{node.role ? node.role.toUpperCase() : 'ROLE NOT SET'}</span>
       </div>
 
       <div className="identity-path">

@@ -55,7 +55,7 @@ export function SourcePanel() {
 
   return (
     <aside className="panel-left">
-      <div className="section-label">01 — Data Source</div>
+      <div className="section-label">Data Source</div>
       <select
         className="source-select"
         value={sourceId ?? ''}

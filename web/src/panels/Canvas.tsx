@@ -122,7 +122,7 @@ export function Canvas() {
       }}
     >
       <div className="section-label" style={{ padding: 16 }}>
-        02 — Model Canvas
+        Model Canvas
       </div>
       {nodes.length === 0 && (
         <div style={{ padding: 16, color: 'var(--as-muted)' }}>

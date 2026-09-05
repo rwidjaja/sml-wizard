@@ -92,9 +92,6 @@ export default function App() {
       <header className="app-header">
         <div className="app-header-left">
           <div className="eyebrow">ATSCALE · SML WIZARD</div>
-          <h1 className="headline">
-            Define the model, <em>generate</em> the SML
-          </h1>
         </div>
         <div className="app-header-right">
           <span className="counter">{c.datasets} DATASETS</span>
