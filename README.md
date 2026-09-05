@@ -138,9 +138,8 @@ it.
 1. **One-time setup**:
    - Create/activate a Python 3.11+ virtualenv and `pip install -r
      api/requirements.txt`.
-   - Copy your AtScale/Git connection details into `api/connections.yaml`
-     (gitignored — never commit real credentials) — see `api/config.py`'s
-     module docstring for the schema.
+   - Copy `api/connections.yaml.sample` to `api/connections.yaml` and fill in your
+     AtScale/Git credentials (gitignored — never commit real credentials).
    - `npx sml-cli` needs to be reachable for the "Validate with sml-cli" and
      Deploy steps.
 2. **Run it**: `./start.sh` from the repo root. It kills anything already

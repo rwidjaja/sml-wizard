@@ -1,0 +1,36 @@
+# connections.yaml.sample
+# Copy this file to api/connections.yaml (or connections.yaml) and fill in your actual credentials.
+# Note: connections.yaml is gitignored to prevent committing secrets.
+
+connections:
+  # Primary AtScale connection configuration
+  my_atscale:
+    atscale:
+      # AtScale Design Center / API endpoint URL
+      url: https://your-atscale-instance.example.com
+      # Credentials (Keycloak username and password)
+      username: your_username
+      password: your_password
+      # Optional API Token (can be generated in AtScale UI)
+      apiToken: your_api_token_here
+      # Set to true to disable SSL certificate verification (e.g. self-signed certs in dev)
+      insecure: true
+
+  # Git / GitHub configuration for saving and deploying SML models
+  git:
+    git:
+      # GitHub username and email used for git author metadata
+      username: your_github_username
+      email: your_email@example.com
+      # GitHub Personal Access Token (PAT) with `repo` scope permissions
+      token: ghp_your_github_personal_access_token
+      # Optional default repository and branch for SML publishing:
+      # repo: https://github.com/your-org/your-sml-repo.git
+      # branch: main
+
+# Optional: User aliases referenced by connection blocks (user: admin)
+# users:
+#   admin:
+#     username: your_username
+#     password: your_password
+#     apiToken: your_api_token
