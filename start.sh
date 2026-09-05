@@ -78,7 +78,12 @@ sleep 2
 
 api_ok=false
 web_ok=false
-for _ in 1 2 3 4 5; do
+# Vite can print "ready" while still finishing a dependency pre-bundling pass
+# (e.g. "Re-optimizing dependencies because vite config has changed") and not
+# actually answer requests for another few seconds - 5 tries at 1s apiece was
+# occasionally too impatient and reported "NOT responding yet" for a server
+# that came up a moment later.
+for _ in $(seq 1 20); do
   curl -s -o /dev/null "http://127.0.0.1:$API_PORT/api/health" 2>/dev/null && api_ok=true
   curl -s -o /dev/null "http://127.0.0.1:$WEB_PORT/" 2>/dev/null && web_ok=true
   [ "$api_ok" = true ] && [ "$web_ok" = true ] && break
