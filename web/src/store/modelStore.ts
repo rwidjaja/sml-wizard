@@ -395,7 +395,8 @@ export function counters(state: ModelState) {
   const joins = state.joins.length
   const metrics = Object.values(state.cfg).filter((c) => c.measure).length
   const levels = Object.values(state.cfg).filter((c) => c.dimRole === 'level').length
-  return { datasets, joins, metrics, levels }
+  const calculations = state.calculations.length
+  return { datasets, joins, metrics, levels, calculations }
 }
 
 export { columnKey }

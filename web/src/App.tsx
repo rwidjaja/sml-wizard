@@ -98,6 +98,7 @@ export default function App() {
           <span className="counter">{c.joins} JOINS</span>
           <span className="counter">{c.metrics} METRICS</span>
           <span className="counter">{c.levels} LEVELS</span>
+          <span className="counter">{c.calculations} CALCULATIONS</span>
           <button className="btn btn-ghost" onClick={() => setShowCalculations(true)}>
             Calculations
           </button>
