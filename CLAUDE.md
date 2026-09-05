@@ -13,6 +13,15 @@ join tables (including dimension-to-dimension "snowflake" joins), configure
 metrics/hierarchies/aliases/secondary attributes, generate + validate SML, then
 publish (Git commit → attach repo to AtScale → deploy → show BI connection info).
 
+**Scope: this is a quick-start tool, not a replacement for AtScale's own modeler.**
+It targets getting a straightforward star/snowflake model deployed fast, not every
+modeling pattern the full product supports. When a feature request would only serve
+a pattern the real modeler already covers well (e.g. a dimension spanning multiple
+physical tables merged into one hierarchy, multi-hierarchy dimensions, MDX calculated
+metrics), weigh it against that scope before building it — see README.md's "Known
+limitations" for what's intentionally out of scope today, and don't quietly expand
+scope without flagging the tradeoff to the user first.
+
 ## Repo layout
 
 - `/api` — Flask (Python), REST JSON backend. Venv lives outside the repo at
