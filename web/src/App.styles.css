@@ -323,9 +323,23 @@
   font-weight: 600;
   display: flex;
   justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  /* Must stay single-line: HEADER_H in Canvas.tsx is a fixed constant used to
+     anchor every join-dot/row position, so a wrapped title desyncs the whole
+     node's rows from where the SVG actually draws their join lines. */
+  overflow: hidden;
+}
+
+.canvas-node-title-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .node-remove {
+  flex-shrink: 0;
   background: none;
   border: none;
   color: white;

@@ -241,7 +241,9 @@ export function Canvas() {
               {(n.role ?? 'unset').toUpperCase()} · {n.schema}
             </div>
             <div className="canvas-node-title">
-              {n.table}
+              <span className="canvas-node-title-text" title={n.table}>
+                {n.table}
+              </span>
               <button
                 className="node-remove"
                 onClick={(e) => {
@@ -274,7 +276,9 @@ export function Canvas() {
                     onPointerDown={(e) => onLinkStart(e, n.id, col.name)}
                     style={{ opacity: joined.has(key) ? 1 : 0.28 }}
                   />
-                  <span className="col-name">{col.name}</span>
+                  <span className="col-name" title={col.name}>
+                    {col.name}
+                  </span>
                   <span className="col-type">{col.type}</span>
                   {c?.measure && <span className="chip chip-fact">Σ SUM</span>}
                   {c?.degen && <span className="chip chip-dimension">DEGEN</span>}
