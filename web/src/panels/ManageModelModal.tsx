@@ -1,6 +1,26 @@
-import { useState } from 'react'
-import { generateSml, importSmlGit, importSmlPath, saveSmlToPath, SmlValidationFailure } from '../api/client'
+import { useRef, useState } from 'react'
+import {
+  generateSml,
+  importSmlFiles,
+  importSmlGit,
+  importSmlPath,
+  saveSmlToPath,
+  SmlValidationFailure,
+  type SmlFile,
+} from '../api/client'
 import { useModelStore } from '../store/modelStore'
+
+const YAML_SUFFIXES = /\.ya?ml$/i
+
+/** Reads every .yml/.yaml file out of a browser folder-picker's FileList -
+ *  used when the path field is left blank, since a file picker never
+ *  exposes an absolute filesystem path the API server could read itself. */
+async function readYamlFilesFromFileList(fileList: FileList): Promise<SmlFile[]> {
+  const files = Array.from(fileList).filter((f) => YAML_SUFFIXES.test(f.name))
+  return Promise.all(
+    files.map(async (f) => ({ name: f.webkitRelativePath || f.name, body: await f.text() })),
+  )
+}
 
 interface Props {
   onClose: () => void
@@ -28,7 +48,10 @@ export function ManageModelModal({ onClose }: Props) {
   const nodes = useModelStore((s) => s.nodes)
   const joins = useModelStore((s) => s.joins)
   const cfg = useModelStore((s) => s.cfg)
+  const calculations = useModelStore((s) => s.calculations)
   const loadModelData = useModelStore((s) => s.loadModelData)
+
+  const folderInputRef = useRef<HTMLInputElement>(null)
 
   async function handleSave() {
     if (!sourceMeta) {
@@ -58,6 +81,7 @@ export function ManageModelModal({ onClose }: Props) {
         nodes,
         joins,
         cfg,
+        calculations,
       })
       const result = await saveSmlToPath(savePath.trim(), files)
       setStatus(`Saved ${result.count} files to ${result.path}`)
@@ -72,13 +96,51 @@ export function ManageModelModal({ onClose }: Props) {
     }
   }
 
+  // A path in the field is read directly by the API server. A blank field
+  // instead opens the browser's folder picker - its files' *content* is sent
+  // to the API (it never hands over an absolute filesystem path).
   async function handleImportPath() {
-    if (!importPath.trim()) return
+    if (!importPath.trim()) {
+      folderInputRef.current?.click()
+      return
+    }
     setBusy(true)
     setError(null)
     try {
       const result = await importSmlPath(importPath.trim())
-      loadModelData({ nodes: result.nodes as never[], joins: result.joins as never[], cfg: result.cfg as never })
+      loadModelData({
+        nodes: result.nodes as never[],
+        joins: result.joins as never[],
+        cfg: result.cfg as never,
+        calculations: result.calculations as never[],
+      })
+      onClose()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleFolderChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const fileList = e.target.files
+    e.target.value = '' // allow re-picking the same folder later
+    if (!fileList || fileList.length === 0) return
+    setBusy(true)
+    setError(null)
+    try {
+      const files = await readYamlFilesFromFileList(fileList)
+      if (files.length === 0) {
+        setError('No .yml/.yaml files found in that folder.')
+        return
+      }
+      const result = await importSmlFiles(files)
+      loadModelData({
+        nodes: result.nodes as never[],
+        joins: result.joins as never[],
+        cfg: result.cfg as never,
+        calculations: result.calculations as never[],
+      })
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -92,7 +154,12 @@ export function ManageModelModal({ onClose }: Props) {
     setError(null)
     try {
       const result = await importSmlGit({ repoUrl: gitRepoUrl.trim() || undefined, branch: gitBranch.trim() })
-      loadModelData({ nodes: result.nodes as never[], joins: result.joins as never[], cfg: result.cfg as never })
+      loadModelData({
+        nodes: result.nodes as never[],
+        joins: result.joins as never[],
+        cfg: result.cfg as never,
+        calculations: result.calculations as never[],
+      })
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -167,7 +234,7 @@ export function ManageModelModal({ onClose }: Props) {
                   From a local directory of SML files
                 </div>
                 <label className="field">
-                  Path (on the machine running the API server)
+                  Path (on the machine running the API server) - leave blank to browse instead
                   <input
                     className="mono-input"
                     placeholder="/path/to/sml-repo"
@@ -175,8 +242,19 @@ export function ManageModelModal({ onClose }: Props) {
                     onChange={(e) => setImportPath(e.target.value)}
                   />
                 </label>
+                {/* @ts-expect-error webkitdirectory isn't in React's DOM typings but every
+                    Chromium/WebKit/Firefox browser supports it for folder picking. */}
+                <input
+                  ref={folderInputRef}
+                  type="file"
+                  webkitdirectory=""
+                  directory=""
+                  multiple
+                  hidden
+                  onChange={handleFolderChosen}
+                />
                 <button className="btn btn-primary" disabled={busy} onClick={handleImportPath}>
-                  {busy ? 'Loading…' : 'Load from path'}
+                  {busy ? 'Loading…' : importPath.trim() ? 'Load from path' : 'Browse for a folder…'}
                 </button>
               </div>
 

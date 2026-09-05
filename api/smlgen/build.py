@@ -140,11 +140,13 @@ def validate_model(nodes: list[dict], joins: list[dict], cfg: dict[str, dict]) -
 
 def build_sml(payload: dict[str, Any]) -> dict[str, str]:
     """payload keys: modelName, catalogName?, connectionName, asConnection,
-    database, schema, dialect, nodes, joins, cfg. Returns {path: yaml_text}.
-    Raises ValidationError if the model fails validate_model()."""
+    database, schema, dialect, nodes, joins, cfg, calculations?. Returns
+    {path: yaml_text}. Raises ValidationError if the model fails
+    validate_model()."""
     nodes: list[dict] = payload["nodes"]
     joins: list[dict] = payload["joins"]
     cfg: dict[str, dict] = payload.get("cfg", {})
+    calculations: list[dict] = payload.get("calculations", [])
     dialect = payload.get("dialect")
     model_name = payload["modelName"]
     catalog_name = payload.get("catalogName") or f"{model_name}_catalog"
@@ -377,6 +379,28 @@ def build_sml(payload: dict[str, Any]) -> dict[str, str]:
                 )
                 degenerate_names.append(degen_name)
 
+    # -- calculations/<name>.yml - calculated metrics (SML `metric_calc`), a
+    # raw MDX expression passed through as-is (see module docstring: this
+    # wizard doesn't validate MDX or build expressions for you). Confirmed
+    # shape against sales-insights-postgres/calculations/*.yml, including
+    # that calc unique_names go in the model's `metrics:` list alongside
+    # base metrics, same as ps-utils' sml-serializer.ts convention.
+    calc_names: list[str] = []
+    for calc in calculations:
+        unique_name = calc.get("uniqueName") or calc.get("label")
+        if not unique_name:
+            continue
+        calc_doc: dict[str, Any] = {
+            "unique_name": unique_name,
+            "object_type": "metric_calc",
+            "label": calc.get("label") or unique_name,
+            "expression": calc.get("expression", ""),
+        }
+        if calc.get("description"):
+            calc_doc["description"] = calc["description"]
+        files[f"calculations/{kebab(unique_name)}.yml"] = _yaml_dump(calc_doc)
+        calc_names.append(unique_name)
+
     # -- models/<modelName>.yml --
     relationships = []
     for j in fact_dim_joins:
@@ -404,7 +428,7 @@ def build_sml(payload: dict[str, Any]) -> dict[str, str]:
         "object_type": "model",
         "label": model_name,
         "relationships": relationships,
-        "metrics": [{"unique_name": m} for m in metric_names],
+        "metrics": [{"unique_name": m} for m in metric_names + calc_names],
     }
     if degenerate_names:
         model_doc["dimensions"] = degenerate_names

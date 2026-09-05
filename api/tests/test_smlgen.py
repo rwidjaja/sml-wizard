@@ -181,6 +181,42 @@ def test_build_sml_key_display_sort_column_overrides():
     assert date_dim["hierarchies"][0]["levels"][0]["unique_name"] == "yr"
 
 
+def test_build_sml_calculations_emit_and_join_model_metrics():
+    """Confirmed against sales-insights-postgres/calculations/*.yml: a calc
+    is object_type metric_calc with unique_name/label/expression, and its
+    unique_name goes in the model's metrics: list alongside base metrics."""
+    payload = copy.deepcopy(PAYLOAD)
+    payload["calculations"] = [
+        {
+            "id": "calc0",
+            "uniqueName": "Average Sales per Order",
+            "label": "Average Sales per Order",
+            "expression": "([Measures].[m_factinternetsales_salesamount_sum] / [Measures].[m_factinternetsales_orderquantity_sum])",
+        }
+    ]
+    files = build_sml(payload)
+    calc = yaml.safe_load(files["calculations/average-sales-per-order.yml"])
+    assert calc["object_type"] == "metric_calc"
+    assert calc["unique_name"] == "Average Sales per Order"
+    assert calc["expression"].startswith("([Measures]")
+
+    model = yaml.safe_load(files["models/sample-dev-test.yml"])
+    metric_names = {m["unique_name"] for m in model["metrics"]}
+    assert "Average Sales per Order" in metric_names
+
+
+def test_parse_sml_round_trips_calculations():
+    payload = copy.deepcopy(PAYLOAD)
+    payload["calculations"] = [
+        {"id": "calc0", "uniqueName": "Average Sales per Order", "label": "Average Sales per Order", "expression": "(1/2)"}
+    ]
+    files = build_sml(payload)
+    result = parse_sml(files)
+    assert len(result["calculations"]) == 1
+    assert result["calculations"][0]["uniqueName"] == "Average Sales per Order"
+    assert result["calculations"][0]["expression"] == "(1/2)"
+
+
 def test_build_sml_catalog_version_is_1_7():
     files = build_sml(PAYLOAD)
     catalog = yaml.safe_load(files["catalog.yml"])

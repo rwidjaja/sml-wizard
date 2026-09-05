@@ -7,6 +7,7 @@ import { Inspector } from './panels/Inspector'
 import { LoginScreen } from './panels/LoginScreen'
 import { SmlViewerModal } from './panels/SmlViewerModal'
 import { ManageModelModal } from './panels/ManageModelModal'
+import { CalculationsModal } from './panels/CalculationsModal'
 import { deployModel, generateSml, SmlValidationFailure, type GenerateSmlPayload, type SmlFile } from './api/client'
 import './App.styles.css'
 
@@ -15,10 +16,11 @@ export default function App() {
   const c = counters(state)
   const authenticated = useSessionStore((s) => s.authenticated)
   const [files, setFiles] = useState<SmlFile[] | null>(null)
-  const [lastPayload, setLastPayload] = useState<GenerateSmlPayload | null>(null)
+  const [lastModelName, setLastModelName] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
   const [showManage, setShowManage] = useState(false)
+  const [showCalculations, setShowCalculations] = useState(false)
 
   if (!authenticated) {
     return <LoginScreen />
@@ -44,6 +46,7 @@ export default function App() {
       nodes: state.nodes,
       joins: state.joins,
       cfg: state.cfg,
+      calculations: state.calculations,
     }
   }
 
@@ -62,7 +65,7 @@ export default function App() {
     try {
       const result = await generateSml(payload)
       setFiles(result.files)
-      setLastPayload(payload)
+      setLastModelName(modelName)
     } catch (err) {
       if (err instanceof SmlValidationFailure) {
         setGenError(err.errors.join('\n'))
@@ -74,9 +77,14 @@ export default function App() {
     }
   }
 
+  // Rebuilds the payload from *current* state rather than reusing whatever
+  // was generated earlier - any tables/joins/metrics/calculations added or
+  // removed since the preview was opened are what actually gets deployed.
   async function handleDeploy() {
-    if (!lastPayload) throw new Error('No model to deploy')
-    return deployModel(lastPayload)
+    if (!lastModelName) throw new Error('No model to deploy')
+    const payload = buildPayload(lastModelName)
+    if (!payload) throw new Error(genError ?? 'Cannot deploy - fix the error above first')
+    return deployModel(payload)
   }
 
   return (
@@ -93,6 +101,9 @@ export default function App() {
           <span className="counter">{c.joins} JOINS</span>
           <span className="counter">{c.metrics} METRICS</span>
           <span className="counter">{c.levels} LEVELS</span>
+          <button className="btn btn-ghost" onClick={() => setShowCalculations(true)}>
+            Calculations
+          </button>
           <button className="btn btn-ghost" onClick={() => setShowManage(true)}>
             Save / Load
           </button>
@@ -116,6 +127,7 @@ export default function App() {
       </div>
       {files && <SmlViewerModal files={files} onClose={() => setFiles(null)} onDeploy={handleDeploy} />}
       {showManage && <ManageModelModal onClose={() => setShowManage(false)} />}
+      {showCalculations && <CalculationsModal onClose={() => setShowCalculations(false)} />}
     </div>
   )
 }

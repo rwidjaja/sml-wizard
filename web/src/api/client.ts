@@ -85,6 +85,7 @@ export interface GenerateSmlPayload {
   nodes: unknown[]
   joins: unknown[]
   cfg: Record<string, unknown>
+  calculations?: unknown[]
 }
 
 export interface DeploySteps {
@@ -158,10 +159,18 @@ export interface ImportedModel {
   nodes: unknown[]
   joins: unknown[]
   cfg: Record<string, unknown>
+  calculations?: unknown[]
 }
 
 export function importSmlPath(path: string) {
   return request<ImportedModel>('/sml/import-path', { method: 'POST', body: JSON.stringify({ path }) })
+}
+
+/** Used by the "browse a folder" fallback when the path field is left blank -
+ *  the browser reads the chosen folder's files client-side (it can't hand the
+ *  API server an absolute path from a file picker) and sends their content. */
+export function importSmlFiles(files: SmlFile[]) {
+  return request<ImportedModel>('/sml/import', { method: 'POST', body: JSON.stringify({ files }) })
 }
 
 export function importSmlGit(payload: { repoUrl?: string; branch?: string; connectionName?: string }) {

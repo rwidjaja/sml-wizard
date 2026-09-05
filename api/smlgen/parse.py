@@ -61,6 +61,7 @@ def _load_all(files: dict[str, str]) -> dict[str, Any]:
         "datasets": {},
         "dimensions": {},
         "metrics": {},
+        "calculations": {},
         "model": None,
     }
     for path, body in files.items():
@@ -78,6 +79,8 @@ def _load_all(files: dict[str, str]) -> dict[str, Any]:
             parsed["dimensions"][doc["unique_name"]] = doc
         elif object_type == "metric":
             parsed["metrics"][doc["unique_name"]] = doc
+        elif object_type == "metric_calc":
+            parsed["calculations"][doc["unique_name"]] = doc
         elif object_type == "model":
             parsed["model"] = doc
     return parsed
@@ -94,6 +97,7 @@ def parse_sml(files: dict[str, str]) -> dict[str, Any]:
     datasets = parsed["datasets"]
     dimensions = parsed["dimensions"]
     metrics = parsed["metrics"]
+    calculations_by_name = parsed["calculations"]
     model = parsed["model"] or {}
 
     # -- classify each dataset: fact (backs a metric), dimension (backs a
@@ -319,7 +323,18 @@ def parse_sml(files: dict[str, str]) -> dict[str, Any]:
         joins.append(join)
 
     joins = _dedupe_joins(joins)
-    return {"nodes": nodes, "joins": joins, "cfg": cfg}
+    calculations = [
+        {
+            "id": f"calc{i}",
+            "uniqueName": calc["unique_name"],
+            "label": calc.get("label") or calc["unique_name"],
+            "expression": calc.get("expression", ""),
+            "description": calc.get("description"),
+        }
+        for i, calc in enumerate(calculations_by_name.values())
+    ]
+
+    return {"nodes": nodes, "joins": joins, "cfg": cfg, "calculations": calculations}
 
 
 def _dedupe_joins(joins: list[dict]) -> list[dict]:

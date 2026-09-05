@@ -91,6 +91,18 @@ export interface SourceMeta {
   database: string
 }
 
+/** A calculated metric (SML `object_type: metric_calc`) - a raw MDX
+ *  expression the user types, not modeled/validated by this wizard beyond
+ *  passing it through (see README's "Known limitations" - no MDX authoring
+ *  UI, no function-whitelist checking; sml-cli/AtScale validates it). */
+export interface Calculation {
+  id: string
+  uniqueName: string
+  label: string
+  expression: string
+  description?: string
+}
+
 export interface ModelState {
   sourceId: string | null
   sourceMeta: SourceMeta | null
@@ -99,6 +111,7 @@ export interface ModelState {
   nodes: Node[]
   joins: Join[]
   cfg: Record<ColumnKey, ColumnConfig>
+  calculations: Calculation[]
   selection: Selection | null
   linkDrag: LinkDrag | null
 
@@ -118,10 +131,20 @@ export interface ModelState {
   select: (selection: Selection | null) => void
   setColumnConfig: (key: ColumnKey, patch: Partial<ColumnConfig>) => void
   setColumnDimRole: (nodeId: string, key: ColumnKey, dimRole: DimRole) => void
+  addCalculation: () => string
+  updateCalculation: (id: string, patch: Partial<Calculation>) => void
+  removeCalculation: (id: string) => void
   reset: () => void
-  /** Replaces nodes/joins/cfg wholesale - used by SML import (the wizard's
-   *  only load path; there is no separate proprietary save format). */
-  loadModelData: (data: { nodes: Node[]; joins: Join[]; cfg: Record<ColumnKey, ColumnConfig> }) => void
+  /** Replaces nodes/joins/cfg/calculations wholesale - used by SML import
+   *  (the wizard's only load path; there is no separate proprietary save
+   *  format). `calculations` defaults to [] for callers that don't have any
+   *  (e.g. older saved state). */
+  loadModelData: (data: {
+    nodes: Node[]
+    joins: Join[]
+    cfg: Record<ColumnKey, ColumnConfig>
+    calculations?: Calculation[]
+  }) => void
 }
 
 const columnKey = (nodeId: string, column: string): ColumnKey => `${nodeId}::${column}`
@@ -149,11 +172,20 @@ export const useModelStore = create<ModelState>((set, get) => ({
   nodes: [],
   joins: [],
   cfg: {},
+  calculations: [],
   selection: null,
   linkDrag: null,
 
   setSourceId: (id, meta) =>
-    set({ sourceId: id, sourceMeta: meta ?? null, nodes: [], joins: [], cfg: {}, selection: null }),
+    set({
+      sourceId: id,
+      sourceMeta: meta ?? null,
+      nodes: [],
+      joins: [],
+      cfg: {},
+      calculations: [],
+      selection: null,
+    }),
   setSearch: (search) => set({ search }),
   toggleSchema: (schema) =>
     set((s) => ({ openSchemas: { ...s.openSchemas, [schema]: !s.openSchemas[schema] } })),
@@ -255,16 +287,41 @@ export const useModelStore = create<ModelState>((set, get) => ({
   setColumnConfig: (key, patch) =>
     set((s) => ({ cfg: { ...s.cfg, [key]: { ...s.cfg[key], ...patch } } })),
 
-  reset: () => set({ nodes: [], joins: [], cfg: {}, selection: null, linkDrag: null }),
+  addCalculation: () => {
+    const id = `calc${seq++}`
+    set((s) => ({
+      calculations: [...s.calculations, { id, uniqueName: `Calc ${s.calculations.length + 1}`, label: '', expression: '' }],
+    }))
+    return id
+  },
+
+  updateCalculation: (id, patch) =>
+    set((s) => ({ calculations: s.calculations.map((c) => (c.id === id ? { ...c, ...patch } : c)) })),
+
+  removeCalculation: (id) => set((s) => ({ calculations: s.calculations.filter((c) => c.id !== id) })),
+
+  reset: () => set({ nodes: [], joins: [], cfg: {}, calculations: [], selection: null, linkDrag: null }),
 
   loadModelData: (data) => {
     // Imported/loaded ids (n0, j0, ...) come from a separate counter (the
     // backend's parser, or a previous session) - bump the local `seq` past
     // whatever's highest here so a newly-added node/join can't collide.
     const maxNum = (id: string) => parseInt(id.replace(/^\D+/, ''), 10) || 0
-    const highest = Math.max(0, ...data.nodes.map((n) => maxNum(n.id)), ...data.joins.map((j) => maxNum(j.id)))
+    const highest = Math.max(
+      0,
+      ...data.nodes.map((n) => maxNum(n.id)),
+      ...data.joins.map((j) => maxNum(j.id)),
+      ...(data.calculations ?? []).map((c) => maxNum(c.id)),
+    )
     seq = Math.max(seq, highest + 1)
-    set({ nodes: data.nodes, joins: data.joins, cfg: data.cfg, selection: null, linkDrag: null })
+    set({
+      nodes: data.nodes,
+      joins: data.joins,
+      cfg: data.cfg,
+      calculations: data.calculations ?? [],
+      selection: null,
+      linkDrag: null,
+    })
   },
 
 }))
