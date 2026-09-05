@@ -4,6 +4,11 @@ import { useModelStore, joinedColumnKeys, type Join, type Node } from '../store/
 const NODE_W = 258
 const HEADER_H = 44
 const ROW_H = 24
+const WORLD_W = 2000
+const WORLD_H = 1400
+const ZOOM_MIN = 0.4
+const ZOOM_MAX = 2
+const ZOOM_STEP = 0.15
 
 interface DragState {
   kind: 'node'
@@ -34,13 +39,22 @@ export function Canvas() {
 
   const [drag, setDrag] = useState<DragState | LinkDragState | null>(null)
   const [linkTo, setLinkTo] = useState<{ x: number; y: number } | null>(null)
+  const [zoom, setZoom] = useState(1)
 
+  // Node positions (node.x/y) live in this fixed "world" space; zoom only
+  // scales how that world is painted (CSS transform on the wrapper below),
+  // so a screen coordinate has to be un-scaled back to world space before
+  // it means anything to addNode/moveNode/anchorFor.
   function surfacePoint(e: { clientX: number; clientY: number }) {
     const rect = surfaceRef.current!.getBoundingClientRect()
     return {
-      x: e.clientX - rect.left + surfaceRef.current!.scrollLeft,
-      y: e.clientY - rect.top + surfaceRef.current!.scrollTop,
+      x: (e.clientX - rect.left + surfaceRef.current!.scrollLeft) / zoom,
+      y: (e.clientY - rect.top + surfaceRef.current!.scrollTop) / zoom,
     }
+  }
+
+  function zoomBy(delta: number) {
+    setZoom((z) => Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z + delta)) * 100) / 100)
   }
 
   function onDragOver(e: React.DragEvent) {
@@ -121,19 +135,47 @@ export function Canvas() {
         if (!target.closest('.canvas-node')) select(null)
       }}
     >
-      <div className="section-label" style={{ padding: 16 }}>
-        Model Canvas
+      <div
+        className="canvas-toolbar"
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 16 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="section-label">Model Canvas</div>
+        <div className="zoom-controls">
+          <button className="btn btn-ghost zoom-btn" onClick={() => zoomBy(-ZOOM_STEP)} disabled={zoom <= ZOOM_MIN}>
+            −
+          </button>
+          <span className="zoom-level">{Math.round(zoom * 100)}%</span>
+          <button className="btn btn-ghost zoom-btn" onClick={() => zoomBy(ZOOM_STEP)} disabled={zoom >= ZOOM_MAX}>
+            +
+          </button>
+          {zoom !== 1 && (
+            <button className="btn btn-ghost zoom-btn" onClick={() => setZoom(1)}>
+              Reset
+            </button>
+          )}
+        </div>
       </div>
       {nodes.length === 0 && (
         <div style={{ padding: 16, color: 'var(--as-muted)' }}>
           Drop a fact table here to start the model.
         </div>
       )}
+      <div
+        className="canvas-world"
+        style={{
+          position: 'relative',
+          width: WORLD_W,
+          height: WORLD_H,
+          transform: `scale(${zoom})`,
+          transformOrigin: '0 0',
+        }}
+      >
       <svg
         className="join-svg"
-        width={2000}
-        height={1400}
-        style={{ position: 'absolute', top: 0, left: 0, width: 2000, height: 1400, pointerEvents: 'none' }}
+        width={WORLD_W}
+        height={WORLD_H}
+        style={{ position: 'absolute', top: 0, left: 0, width: WORLD_W, height: WORLD_H, pointerEvents: 'none' }}
       >
         {joins.map((j: Join) => {
           const a = nodes.find((n) => n.id === j.a.node)
@@ -298,6 +340,7 @@ export function Canvas() {
           </div>
         </div>
       ))}
+      </div>
     </main>
   )
 }

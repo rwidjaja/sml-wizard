@@ -373,14 +373,18 @@ export function Inspector() {
         {metrics.map(([k, c]) => (
           <div key={k} className="metric-row">
             <span className="chip chip-fact">Σ {c.agg}</span>
-            <span className="attr-label">{c.display ?? k.split('::')[1]}</span>
+            <span className="attr-label" title={c.display ?? k.split('::')[1]}>
+              {c.display ?? k.split('::')[1]}
+            </span>
             <span className="level-source">{c.query ?? k.split('::')[1]}</span>
           </div>
         ))}
         {degenerates.map(([k, c]) => (
           <div key={k} className="metric-row">
             <span className="chip chip-dimension">DEGEN</span>
-            <span className="attr-label">{c.degenDisplay ?? k.split('::')[1]}</span>
+            <span className="attr-label" title={c.degenDisplay ?? k.split('::')[1]}>
+              {c.degenDisplay ?? k.split('::')[1]}
+            </span>
             <span className="level-source">{c.degenQuery ?? k.split('::')[1]}</span>
           </div>
         ))}
@@ -448,7 +452,9 @@ export function Inspector() {
     return (
       <div className="attr-row" style={{ paddingLeft: 28 + depth * 14 }}>
         <span className="attr-ring" />
-        <span className="attr-label">{label}</span>
+        <span className="attr-label" title={label}>
+          {label}
+        </span>
         <span className="chip chip-join">{tag}</span>
       </div>
     )
