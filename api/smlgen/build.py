@@ -286,12 +286,16 @@ def build_sml(payload: dict[str, Any]) -> dict[str, str]:
 
     def target_level(node_id: str, column: str, dialect: str | None) -> str:
         """The unique_name a relationship joining `node_id` on `column`
-        should reference - the real level backing it if one exists, else its
-        synthetic hidden anchor level (see hidden_levels_needed above)."""
+        should reference - the real level backing it if one exists, else the
+        dimension's leaf level, whose key_columns the dimension-emission loop
+        above repoints at this same `column` as a secondary attribute (see
+        hidden_levels_needed and the anchor_col logic) - never the bare
+        column name itself, which is a secondary attribute's unique_name
+        here, not a level's, and SML's `to.level` must name an actual level."""
         matched = _level_for_column(cfg, node_id, column)
         if matched:
             return level_unique_name(matched["config"], matched["column"])
-        return cased(column, dialect)
+        return leaf_level(node_id) or cased(column, dialect)
 
     # -- dimensions/<dimName>.yml, one per dimension-role node --
     for n in nodes:
@@ -331,12 +335,18 @@ def build_sml(payload: dict[str, Any]) -> dict[str, str]:
                 s_col_full = s["key"].split("::", 1)[1]
                 s_display = s["config"].get("display") or title_case(s_col_full)
                 s_key_col, s_name_col, s_sort_col = _resolve_key_display_sort(s["config"], s_col_full, dialect)
+                # No is_unique_key or contains_unique_names here at all - not
+                # even `false`. Confirmed against a real hand-authored repo
+                # (sales-insights-postgres' Product Dimension:
+                # d_productsubcategoryId) that a secondary attribute carries
+                # neither field; setting either explicitly to False (this
+                # code's behavior before this fix) made AtScale silently drop
+                # the property from MDSCHEMA_PROPERTIES discovery entirely
+                # instead of just leaving it non-unique.
                 s_attr = {
                     "unique_name": level_unique_name(s["config"], s_col_full),
                     "label": s_display,
-                    "contains_unique_names": False,
                     "dataset": table,
-                    "is_unique_key": False,
                     "key_columns": [s_key_col],
                     "name_column": s_name_col,
                 }
@@ -350,9 +360,7 @@ def build_sml(payload: dict[str, Any]) -> dict[str, str]:
                     {
                         "unique_name": anchor_name,
                         "label": anchor_name,
-                        "contains_unique_names": False,
                         "dataset": table,
-                        "is_unique_key": False,
                         "key_columns": [anchor_name],
                         "name_column": anchor_name,
                     }
