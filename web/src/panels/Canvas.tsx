@@ -240,7 +240,12 @@ export function Canvas() {
                 fill="var(--as-modal)"
                 stroke="var(--as-join)"
                 strokeWidth={1.5}
-                style={{ cursor: 'pointer' }}
+                // The parent <svg> is pointerEvents:'none' (so the canvas
+                // background stays clickable/pannable under the join lines) -
+                // the join <path> above re-enables it on its own stroke, but
+                // this delete control needs the same override itself, or
+                // clicks pass straight through it to whatever's behind.
+                style={{ cursor: 'pointer', pointerEvents: 'auto' }}
                 onClick={(e) => {
                   e.stopPropagation()
                   removeJoin(j.id)

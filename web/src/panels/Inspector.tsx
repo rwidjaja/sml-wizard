@@ -401,6 +401,9 @@ export function Inspector() {
               {c.display ?? k.split('::')[1]}
             </span>
             <span className="level-source">{c.query ?? k.split('::')[1]}</span>
+            <button className="row-remove" title="Remove metric" onClick={() => setColumnConfig(k, { measure: false })}>
+              ✕
+            </button>
           </div>
         ))}
         {degenerates.map(([k, c]) => (
@@ -410,6 +413,9 @@ export function Inspector() {
               {c.degenDisplay ?? k.split('::')[1]}
             </span>
             <span className="level-source">{c.degenQuery ?? k.split('::')[1]}</span>
+            <button className="row-remove" title="Remove degenerate dimension" onClick={() => setColumnConfig(k, { degen: false })}>
+              ✕
+            </button>
           </div>
         ))}
       </div>
@@ -467,13 +473,32 @@ export function Inspector() {
                     </span>
                   )}
                   <span className="chip chip-level">L{idx + 1}</span>
+                  <button
+                    className="row-remove"
+                    title="Remove level"
+                    onClick={() => setColumnDimRole(nodeId, l.key, 'none')}
+                  >
+                    ✕
+                  </button>
                 </div>
               </div>
               {aliases.map((a) => (
-                <AttrRow key={a.key} label={a.config.display ?? a.key.split('::')[1]} tag="ALIAS" depth={1} />
+                <AttrRow
+                  key={a.key}
+                  label={a.config.display ?? a.key.split('::')[1]}
+                  tag="ALIAS"
+                  depth={1}
+                  onRemove={() => setColumnDimRole(nodeId, a.key, 'none')}
+                />
               ))}
               {secs.map((s) => (
-                <AttrRow key={s.key} label={s.config.display ?? s.key.split('::')[1]} tag="SECONDARY" depth={1} />
+                <AttrRow
+                  key={s.key}
+                  label={s.config.display ?? s.key.split('::')[1]}
+                  tag="SECONDARY"
+                  depth={1}
+                  onRemove={() => setColumnDimRole(nodeId, s.key, 'none')}
+                />
               ))}
             </div>
           )
@@ -482,7 +507,17 @@ export function Inspector() {
     )
   }
 
-  function AttrRow({ label, tag, depth }: { label: string; tag: string; depth: number }) {
+  function AttrRow({
+    label,
+    tag,
+    depth,
+    onRemove,
+  }: {
+    label: string
+    tag: string
+    depth: number
+    onRemove: () => void
+  }) {
     return (
       <div className="attr-row" style={{ paddingLeft: 28 + depth * 14 }}>
         <span className="attr-ring" />
@@ -490,6 +525,9 @@ export function Inspector() {
           {label}
         </span>
         <span className="chip chip-join">{tag}</span>
+        <button className="row-remove" title={`Remove ${tag.toLowerCase()}`} onClick={onRemove}>
+          ✕
+        </button>
       </div>
     )
   }

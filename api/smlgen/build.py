@@ -60,6 +60,26 @@ def _attached_to(cfg: dict[str, dict], level_key: str, dim_role: str) -> list[di
     return out
 
 
+def _level_for_column(cfg: dict[str, dict], node_id: str, column: str) -> dict | None:
+    """The hierarchy level whose *effective* key column (the Key Column
+    override if set, else the level's own column) is `column` - i.e. the
+    level that actually backs a join drawn to this physical column.
+
+    A join edge can land on any column, not just the one the user happened to
+    mark as a level (e.g. joining a fact's FK to a dimension's surrogate key
+    while a *different* column on that table is marked as the display level).
+    Relationship generation must key off the joined column, not just always
+    the dimension's leaf level - using the wrong one produces a `to.level`
+    whose key_columns don't match the join's actual column/type (confirmed:
+    joining on an int FK while the leaf level's key is a string display
+    column produced `bigint = text` from AtScale's query engine)."""
+    for lv in _levels_of(cfg, node_id):
+        key_col = lv["config"].get("keyColumn") or lv["column"]
+        if key_col == column:
+            return lv
+    return None
+
+
 def _resolve_key_display_sort(config: dict, own_col: str, dialect: str | None) -> tuple[str, str, str | None]:
     """SML lets key_columns (join/identity), name_column (display), and
     sort_column all be different physical columns on the same level/attribute
@@ -146,6 +166,23 @@ def validate_model(nodes: list[dict], joins: list[dict], cfg: dict[str, dict]) -
     return errors
 
 
+def _join_dimension_side(nodes_by_id: dict[str, dict], j: dict) -> tuple[str, str] | None:
+    """(node_id, column) of whichever side of `j` needs to resolve to a real
+    hierarchy level - for a fact<->dim join, whichever side has role
+    'dimension'; for a dim<->dim embedded join, join.b (the drop-target side,
+    by this wizard's drag-origin/drop-target convention) - the "from" side's
+    join_columns is always explicit in the generated SML, so it never needs
+    to itself be a level. None if neither side is a dimension."""
+    a_node, b_node = nodes_by_id[j["a"]["node"]], nodes_by_id[j["b"]["node"]]
+    if a_node.get("role") == "dimension" and b_node.get("role") == "dimension":
+        return j["b"]["node"], j["b"]["column"]
+    if a_node.get("role") == "dimension":
+        return j["a"]["node"], j["a"]["column"]
+    if b_node.get("role") == "dimension":
+        return j["b"]["node"], j["b"]["column"]
+    return None
+
+
 def build_sml(payload: dict[str, Any]) -> dict[str, str]:
     """payload keys: modelName, catalogName?, connectionName, asConnection,
     database, schema, dialect, nodes, joins, cfg, calculations?. Returns
@@ -212,12 +249,29 @@ def build_sml(payload: dict[str, Any]) -> dict[str, str]:
     # join-creation gesture works), join.b is the drop target (the parent/PK side).
     embedded_by_node: dict[str, list[dict]] = {n["id"]: [] for n in nodes}
     fact_dim_joins: list[dict] = []
+    # Columns joined to a dimension that don't back any hierarchy level the
+    # user actually defined (e.g. a fact joins the dimension's raw surrogate
+    # key while the user only marked a *display* column, like a name, as the
+    # level) - a real, common pattern (confirmed in sales-insights-postgres'
+    # Geography Dimension, which has exactly this: a `GeoKeyCity`/`GeoKeyZip`
+    # level with `is_hidden: true` beneath the visible City/Zip levels, keyed
+    # by the raw join column). Each such column gets its own synthetic hidden
+    # leaf level below, so every join resolves to *some* real level - SML's
+    # `to.level` has no separate join_columns of its own, so the referenced
+    # level's key_columns must match the actual join column or the generated
+    # relationship silently joins on the wrong (and often type-mismatched)
+    # column instead - this is what makes that always possible without
+    # requiring the user to hand-configure a Key Column override.
+    hidden_levels_needed: dict[str, set[str]] = {n["id"]: set() for n in nodes}
     for j in joins:
         a_node, b_node = nodes_by_id[j["a"]["node"]], nodes_by_id[j["b"]["node"]]
         if a_node["role"] == "dimension" and b_node["role"] == "dimension":
             embedded_by_node[a_node["id"]].append(j)
         else:
             fact_dim_joins.append(j)
+        dim_side = _join_dimension_side(nodes_by_id, j)
+        if dim_side and _level_for_column(cfg, dim_side[0], dim_side[1]) is None:
+            hidden_levels_needed[dim_side[0]].add(dim_side[1])
 
     def level_unique_name(config: dict, column: str) -> str:
         """`unique_name` for a level/secondary/alias - the "Query name" field
@@ -230,6 +284,15 @@ def build_sml(payload: dict[str, Any]) -> dict[str, str]:
         levels = _levels_of(cfg, node_id)
         return level_unique_name(levels[-1]["config"], levels[-1]["column"]) if levels else None
 
+    def target_level(node_id: str, column: str, dialect: str | None) -> str:
+        """The unique_name a relationship joining `node_id` on `column`
+        should reference - the real level backing it if one exists, else its
+        synthetic hidden anchor level (see hidden_levels_needed above)."""
+        matched = _level_for_column(cfg, node_id, column)
+        if matched:
+            return level_unique_name(matched["config"], matched["column"])
+        return cased(column, dialect)
+
     # -- dimensions/<dimName>.yml, one per dimension-role node --
     for n in nodes:
         if n.get("role") != "dimension":
@@ -239,9 +302,25 @@ def build_sml(payload: dict[str, Any]) -> dict[str, str]:
         dim_name = n.get("dimName") or n["table"]
         table = n["table"]
 
+        # A join landing on a column no visible level's own key covers (e.g. a
+        # fact FK joined to a dimension's surrogate key while the user only
+        # marked a *display* column, like a name, as the level) attaches to
+        # the LEAF level as an extra secondary attribute, keyed by that join
+        # column - matching the real repo's own pattern (sales-insights-
+        # postgres' "Product Name" level: key_columns=[productkey],
+        # name_column=englishproductname) rather than a separate hierarchy
+        # level. Confirmed two ways against a real deploy: adding it as a
+        # *second level* instead made AtScale drop the display level from
+        # XMLA discovery entirely (whether or not that extra level was
+        # `is_hidden`) - only a same-level secondary attribute keeps both
+        # names browsable, which is what a user actually wants (dimRole
+        # 'secondary' already means exactly "hangs off a level, same grain").
+        anchor_col = next(iter(sorted(hidden_levels_needed.get(n["id"], ()))), None)
+
         level_entries = []
         level_attributes = []
         for lv in levels:
+            is_leaf = lv is levels[-1]
             col = level_unique_name(lv["config"], lv["column"])
             display = lv["config"].get("display") or title_case(lv["column"])
             secondaries = _attached_to(cfg, lv["key"], "secondary")
@@ -265,12 +344,36 @@ def build_sml(payload: dict[str, Any]) -> dict[str, str]:
                     s_attr["sort_column"] = s_sort_col
                 secondary_attrs.append(s_attr)
 
+            if is_leaf and anchor_col and anchor_col != lv["column"]:
+                anchor_name = cased(anchor_col, dialect)
+                secondary_attrs.append(
+                    {
+                        "unique_name": anchor_name,
+                        "label": anchor_name,
+                        "contains_unique_names": False,
+                        "dataset": table,
+                        "is_unique_key": False,
+                        "key_columns": [anchor_name],
+                        "name_column": anchor_name,
+                    }
+                )
+
             level_entry: dict[str, Any] = {"unique_name": col}
             if secondary_attrs:
                 level_entry["secondary_attributes"] = secondary_attrs
             level_entries.append(level_entry)
 
-            key_col, name_col, sort_col = _resolve_key_display_sort(lv["config"], lv["column"], dialect)
+            # The join's actual column becomes this level's key when it's the
+            # leaf and no configured level already covers it - the level the
+            # user clicked (englishproductname) stays the display/name_column,
+            # but the real join grain (productkey) is what AtScale resolves
+            # `to.level` into for the SQL join, same as any other Key Column
+            # override, just inferred instead of requiring one.
+            if is_leaf and anchor_col and anchor_col != lv["column"]:
+                key_col = cased(anchor_col, dialect)
+                _, name_col, sort_col = _resolve_key_display_sort(lv["config"], lv["column"], dialect)
+            else:
+                key_col, name_col, sort_col = _resolve_key_display_sort(lv["config"], lv["column"], dialect)
             attr: dict[str, Any] = {
                 "unique_name": col,
                 "label": display,
@@ -287,9 +390,12 @@ def build_sml(payload: dict[str, Any]) -> dict[str, str]:
                 attr["time_unit"] = lv["config"]["timeUnit"]
             level_attributes.append(attr)
 
-        # Rule: is_unique_key only when derivable - here, only for a single-level
-        # dimension (matches sample-dev's Product Level, the one case that has it).
-        if len(level_attributes) == 1:
+        # Rule: is_unique_key only when derivable - here, only for a
+        # single-level dimension (matches sample-dev's Product Level, the one
+        # case that has it) whose key wasn't just repointed at a separate
+        # anchor column above (in that case the level's own display column is
+        # no longer what actually identifies a row, so it isn't the unique key).
+        if len(level_attributes) == 1 and not (anchor_col and anchor_col != levels[0]["column"]):
             level_attributes[0]["is_unique_key"] = True
 
         dim_doc: dict[str, Any] = {
@@ -306,7 +412,16 @@ def build_sml(payload: dict[str, Any]) -> dict[str, str]:
             for j in embedded_joins:
                 to_node = nodes_by_id[j["b"]["node"]]
                 to_dim_name = to_node.get("dimName") or to_node["table"]
-                to_leaf = leaf_level(to_node["id"])
+                # The "to" (drop-target) side has no join_columns field of its
+                # own in SML - only `to.level`, whose key_columns AtScale
+                # resolves the actual SQL join from - so it must be the level
+                # this join's column actually backs (its real level, or its
+                # synthetic hidden anchor level - see target_level), not just
+                # always the dimension's leaf level. The "from" side's
+                # join_columns is explicit, so from.level stays purely
+                # descriptive hierarchy-attachment metadata - the dimension's
+                # own leaf level, same as before.
+                to_leaf = target_level(to_node["id"], j["b"]["column"], dialect)
                 from_col = cased(j["a"]["column"], dialect)
                 rels.append(
                     {
@@ -344,14 +459,22 @@ def build_sml(payload: dict[str, Any]) -> dict[str, str]:
                 agg = c.get("agg", "SUM")
                 calc = AGG_TO_CALC_METHOD.get(agg, "sum")
                 display = c.get("display") or title_case(col_name)
-                metric_unique = f"m_{table}_{col_name}_{agg.lower().replace(' ', '_')}"
-                files[f"metrics/{metric_unique}.yml"] = _yaml_dump(
+                # "Query name" (c.get("query")) overrides the metric's own
+                # unique_name here, exactly like level_unique_name already
+                # does for a hierarchy level's unique_name - previously this
+                # field only overrode the metric's source `column:`, so the
+                # Inspector showed a name the generated SML silently ignored
+                # for the identifier a hand-written MDX/query would reference
+                # (confirmed: user expected "salesamount", generated SML had
+                # "m_factinternetsales_salesamount_sum").
+                metric_unique = c.get("query") or f"m_{table}_{col_name}_{agg.lower().replace(' ', '_')}"
+                files[f"metrics/{kebab(metric_unique)}.yml"] = _yaml_dump(
                     {
                         "unique_name": metric_unique,
                         "object_type": "metric",
                         "label": display,
                         "calculation_method": calc,
-                        "column": c.get("query") and cased(c["query"], dialect) or col,
+                        "column": col,
                         "dataset": table,
                         "unrelated_dimensions_handling": "repeat",
                     }
@@ -421,12 +544,19 @@ def build_sml(payload: dict[str, Any]) -> dict[str, str]:
             fact_node, fact_col, dim_node, dim_col = b_node, j["b"]["column"], a_node, j["a"]["column"]
 
         dim_name = dim_node.get("dimName") or dim_node["table"]
-        leaf = leaf_level(dim_node["id"])
+        # The level whose *effective key column* is the one this join
+        # actually lands on - its real level, or its synthetic hidden anchor
+        # level if no visible level backs this column (see target_level) -
+        # not always the dimension's leaf level, which would join on the
+        # wrong column whenever the join target isn't the deepest level (e.g.
+        # an FK joined to a surrogate key while the leaf level is a separate
+        # display column).
+        target = target_level(dim_node["id"], dim_col, dialect)
         fact_col_cased = cased(fact_col, dialect)
         rel: dict[str, Any] = {
             "unique_name": f"{fact_node['table']}_{fact_col_cased}_to_{dim_name}",
             "from": {"dataset": fact_node["table"], "join_columns": [fact_col_cased]},
-            "to": {"dimension": dim_name, "level": leaf},
+            "to": {"dimension": dim_name, "level": target},
         }
         role_play = j.get("rolePlay")
         if role_play:

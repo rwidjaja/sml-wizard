@@ -16,10 +16,19 @@ from routes.session import get_client
 
 preview_bp = Blueprint("preview", __name__)
 
-# Cube metadata rarely changes mid-session and MDSCHEMA_LEVELS is one of four
-# XMLA round-trips per (catalog, cube) - cache the whole load_cube_metadata()
-# result, including the raw `_levels` list build_initial_mdx needs.
-_metadata_cache: dict[tuple[str, str], dict] = {}
+# No cross-request cache here (confirmed against the user's own reference
+# tool, PythonAtscaleUtility/cubes/cubes_core_functions.py: it refetches
+# MDSCHEMA_* fresh on every catalog/cube selection, never caching). An
+# earlier version of this file cached load_cube_metadata() indefinitely per
+# (catalog, cube) - harmless for a catalog that's deployed once, but this
+# wizard's own workflow is edit -> deploy -> preview -> edit -> redeploy in
+# one sitting, and AtScale can rename/reassign measure and level unique_names
+# across a redeploy (confirmed: a metric regenerated under the same display
+# name came back with a different unique_name after a second deploy). A
+# process-lifetime cache kept serving the *first* deploy's names forever,
+# so a query built from the (correctly fetched, but stale) cached metadata
+# referenced a measure/level unique_name that no longer existed - "works
+# right after deploying, breaks after redeploying" was the exact symptom.
 
 
 @preview_bp.get("/preview/catalogs")
@@ -44,16 +53,10 @@ def metadata():
     if not catalog or not cube:
         return jsonify({"error": "Missing 'catalog' or 'cube' query param"}), 400
 
-    cache_key = (catalog, cube)
-    cached = _metadata_cache.get(cache_key)
-    if cached is not None:
-        result = cached
-    else:
-        try:
-            result = load_cube_metadata(client, catalog, cube)
-        except Exception as e:
-            return jsonify({"error": str(e)}), 502
-        _metadata_cache[cache_key] = result
+    try:
+        result = load_cube_metadata(client, catalog, cube)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
 
     return jsonify({"dimensions": result["dimensions"], "measures": result["measures"]})
 
@@ -78,14 +81,10 @@ def query():
     if dialect == "mdx" and not hierarchies:
         return jsonify({"error": "Select at least one dimension/hierarchy for an MDX query"}), 400
 
-    cache_key = (catalog, cube)
-    cached = _metadata_cache.get(cache_key)
-    if cached is None:
-        try:
-            cached = load_cube_metadata(client, catalog, cube)
-        except Exception as e:
-            return jsonify({"error": str(e)}), 502
-        _metadata_cache[cache_key] = cached
+    try:
+        cube_metadata = load_cube_metadata(client, catalog, cube)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
 
     try:
         result = run_preview_query(
@@ -95,7 +94,7 @@ def query():
             dialect,
             hierarchies,
             measures,
-            cached["_levels"],
+            cube_metadata["_levels"],
             use_agg=body.get("useAgg", True),
             use_cache=body.get("useCache", True),
         )

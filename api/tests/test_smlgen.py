@@ -106,7 +106,14 @@ PAYLOAD = {
         "n1::productcategorykey": {"dimRole": "level", "levelOrder": 0, "display": "Product Category"},
         "n2::year": {"dimRole": "level", "levelOrder": 0, "display": "Year", "timeUnit": "year"},
         "n2::quarter": {"dimRole": "level", "levelOrder": 1, "display": "Quarter", "timeUnit": "quarter"},
-        "n2::month": {"dimRole": "level", "levelOrder": 2, "display": "Month", "timeUnit": "month"},
+        # keyColumn override: the fact's FK (datekey) is the actual join
+        # grain, distinct from this level's own display column (month) - a
+        # level's key/display columns legitimately differ in SML (Rule: see
+        # smlgen/build.py's _resolve_key_display_sort), and the leaf level of
+        # whichever hierarchy a fact join targets must resolve to the join's
+        # real column or the generated relationship joins on the wrong (and
+        # type-mismatched) column - confirmed against a real deploy.
+        "n2::month": {"dimRole": "level", "levelOrder": 2, "display": "Month", "timeUnit": "month", "keyColumn": "datekey"},
         "n2::year_name": {"dimRole": "secondary", "attachToKey": "n2::year", "display": "Year Name"},
         "n2::quarter_name": {"dimRole": "secondary", "attachToKey": "n2::quarter", "display": "Quarter Name"},
         "n2::month_name": {"dimRole": "secondary", "attachToKey": "n2::month", "display": "Month Name"},
@@ -259,8 +266,12 @@ def test_parse_sml_round_trips_build_sml_output():
         for j in result["joins"]
         if j["a"]["node"] == node_id_by_table["factinternetsales"]
     }
-    assert role_plays[("orderdatekey", "month")] == "Order"
-    assert role_plays[("shipdatekey", "month")] == "Ship"
+    # Resolves to "datekey" (the month level's Key Column override, and the
+    # actual join grain), not "month" (its display column) - see the
+    # keyColumn override on n2::month in PAYLOAD and _level_for_column in
+    # build.py for why the relationship must round-trip on the real join key.
+    assert role_plays[("orderdatekey", "datekey")] == "Order"
+    assert role_plays[("shipdatekey", "datekey")] == "Ship"
 
     # Snowflake (embedded) dim<->dim join survives the round trip.
     snowflake = [

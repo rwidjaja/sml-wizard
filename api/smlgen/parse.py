@@ -318,7 +318,14 @@ def parse_sml(files: dict[str, str]) -> dict[str, Any]:
         col = metric.get("column")
         key = f"{node_id}::{col}"
         agg = CALC_METHOD_TO_AGG.get(metric.get("calculation_method"), "SUM")
-        cfg[key] = {"measure": True, "agg": agg, "display": metric.get("label"), "query": col}
+        # "query" is the metric's own unique_name (build.py's Query name
+        # override to the metric's own identifier, not its source column -
+        # matching level_unique_name's same convention for a level) so
+        # re-editing an imported model and regenerating keeps the same
+        # unique_name a deployed catalog/MDX query already references,
+        # instead of silently renaming it to the auto m_<table>_<col>_<agg>
+        # pattern on the next generate.
+        cfg[key] = {"measure": True, "agg": agg, "display": metric.get("label"), "query": metric.get("unique_name")}
 
     for degen in degenerate_dims:
         level_attrs = degen.get("level_attributes") or []

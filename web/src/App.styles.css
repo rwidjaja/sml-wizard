@@ -427,6 +427,24 @@
   font-size: 11px;
 }
 
+/* Removes a single metric/level/alias/secondary-attribute row from the
+   Inspector's readout lists, without having to re-find and re-select the
+   source column on the canvas. */
+.row-remove {
+  flex-shrink: 0;
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--as-muted-56);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+}
+
+.row-remove:hover {
+  color: var(--as-join);
+}
+
 .canvas-node-body {
   display: flex;
   flex-direction: column;
