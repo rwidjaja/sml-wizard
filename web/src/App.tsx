@@ -10,6 +10,7 @@ import { ManageModelModal } from './panels/ManageModelModal'
 import { CalculationsModal } from './panels/CalculationsModal'
 import { PreviewTab } from './panels/PreviewTab'
 import { deployModel, generateSml, SmlValidationFailure, type GenerateSmlPayload, type SmlFile } from './api/client'
+import { MODEL_NAME_HINT, slugifyModelName } from './lib/naming'
 import './App.styles.css'
 
 type AppTab = 'build' | 'preview'
@@ -20,7 +21,6 @@ export default function App() {
   const authenticated = useSessionStore((s) => s.authenticated)
   const [tab, setTab] = useState<AppTab>('build')
   const [files, setFiles] = useState<SmlFile[] | null>(null)
-  const [lastModelName, setLastModelName] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
   const [showManage, setShowManage] = useState(false)
@@ -51,6 +51,12 @@ export default function App() {
       joins: state.joins,
       cfg: state.cfg,
       calculations: state.calculations,
+      // Redeploying a model loaded from AtScale - push back to the same
+      // repo/branch it came from (git_ops.ensure_github_repo's slug-derived
+      // name lookup would otherwise risk creating an unrelated repo, since
+      // AtScale's own repo display name is allowed to contain spaces).
+      gitRepoUrl: state.sourceRepo?.url,
+      gitBranch: state.sourceRepo?.branch,
     }
   }
 
@@ -59,9 +65,11 @@ export default function App() {
   // Deploy button (wired to handleDeploy below) runs generate -> save -> git
   // commit/push -> attach to AtScale -> deploy.
   async function handleGenerate() {
-    const modelName = window.prompt('Model name:', 'my_model')
-    if (!modelName) return
-    const payload = buildPayload(modelName)
+    if (!state.modelName.trim()) {
+      setGenError('Enter a model name (top left) before generating SML.')
+      return
+    }
+    const payload = buildPayload(state.modelName)
     if (!payload) return
 
     setGenerating(true)
@@ -69,7 +77,6 @@ export default function App() {
     try {
       const result = await generateSml(payload)
       setFiles(result.files)
-      setLastModelName(modelName)
     } catch (err) {
       if (err instanceof SmlValidationFailure) {
         setGenError(err.errors.join('\n'))
@@ -85,8 +92,7 @@ export default function App() {
   // was generated earlier - any tables/joins/metrics/calculations added or
   // removed since the preview was opened are what actually gets deployed.
   async function handleDeploy() {
-    if (!lastModelName) throw new Error('No model to deploy')
-    const payload = buildPayload(lastModelName)
+    const payload = buildPayload(state.modelName)
     if (!payload) throw new Error(genError ?? 'Cannot deploy - fix the error above first')
     return deployModel(payload)
   }
@@ -96,6 +102,13 @@ export default function App() {
       <header className="app-header">
         <div className="app-header-left">
           <div className="eyebrow">ATSCALE · SML WIZARD</div>
+          <input
+            className="model-name-input"
+            placeholder="Model name"
+            title={MODEL_NAME_HINT}
+            value={state.modelName}
+            onChange={(e) => state.setModelName(slugifyModelName(e.target.value))}
+          />
           <div className="app-tabs">
             {(['build', 'preview'] as AppTab[]).map((t) => (
               <button

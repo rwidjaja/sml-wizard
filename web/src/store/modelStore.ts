@@ -113,7 +113,17 @@ export interface Calculation {
   description?: string
 }
 
+export interface SourceRepo {
+  url: string
+  branch: string
+}
+
 export interface ModelState {
+  modelName: string
+  /** Set when the current model was loaded from an AtScale-attached repo, so
+   *  Deploy pushes back to the same repo/branch it came from instead of
+   *  requiring the model name alone to rediscover it. Cleared by reset(). */
+  sourceRepo: SourceRepo | null
   sourceId: string | null
   sourceMeta: SourceMeta | null
   search: string
@@ -125,6 +135,8 @@ export interface ModelState {
   selection: Selection | null
   linkDrag: LinkDrag | null
 
+  setModelName: (name: string) => void
+  setSourceRepo: (repo: SourceRepo | null) => void
   setSourceId: (id: string | null, meta?: SourceMeta | null) => void
   /** Patches sourceMeta in place - for correcting a connection's
    *  dialect/connectionId/database by hand, e.g. after importing SML whose
@@ -248,6 +260,8 @@ function seededNamesFor(table: string, role: Role) {
 let seq = 0
 
 export const useModelStore = create<ModelState>((set, get) => ({
+  modelName: '',
+  sourceRepo: null,
   sourceId: null,
   sourceMeta: null,
   search: '',
@@ -258,6 +272,9 @@ export const useModelStore = create<ModelState>((set, get) => ({
   calculations: [],
   selection: null,
   linkDrag: null,
+
+  setModelName: (name) => set({ modelName: name }),
+  setSourceRepo: (repo) => set({ sourceRepo: repo }),
 
   // Deliberately does NOT touch nodes/joins/cfg/calculations - picking a
   // source is also how a loaded model gets its connection re-matched to a
@@ -396,7 +413,8 @@ export const useModelStore = create<ModelState>((set, get) => ({
 
   removeCalculation: (id) => set((s) => ({ calculations: s.calculations.filter((c) => c.id !== id) })),
 
-  reset: () => set({ nodes: [], joins: [], cfg: {}, calculations: [], selection: null, linkDrag: null }),
+  reset: () =>
+    set({ nodes: [], joins: [], cfg: {}, calculations: [], selection: null, linkDrag: null, sourceRepo: null }),
 
   loadModelData: (data) => {
     // Imported/loaded ids (n0, j0, ...) come from a separate counter (the

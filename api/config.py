@@ -32,7 +32,24 @@ from typing import Any
 
 import yaml
 
+from smlgen.naming import slugify_model_name
+
 DEFAULT_CONFIG_PATH = os.environ.get("SML_WIZARD_CONNECTIONS_FILE", "connections.yaml")
+
+# Repo root (this file lives at <repo>/api/config.py), matching where
+# start.sh/`connections.yaml` already expect to be run from - not api/'s own
+# directory, so the workspace sits next to CLAUDE.md/docs/, not buried in api/.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+WORKSPACE_ROOT = Path(os.environ.get("SML_WIZARD_WORKSPACE", _REPO_ROOT / "workspace")).resolve()
+
+
+def model_workspace_dir(model_name: str) -> Path:
+    """The one persistent working directory for a given model - both Save and
+    Deploy write here, so they operate on the same on-disk checkout instead of
+    two different staging locations."""
+    root = WORKSPACE_ROOT / slugify_model_name(model_name)
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def load_config(path: str | None = None) -> dict[str, Any]:

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from flask import Blueprint, current_app, jsonify, request
 
-from config import resolve_git_connection
+from config import WORKSPACE_ROOT, model_workspace_dir, resolve_git_connection
+from routes.session import get_client
 from smlgen.build import ValidationError, build_sml
+from smlgen.naming import is_valid_model_name
 from smlgen.parse import parse_sml
 from smlgen.validate import SmlCliNotFound, validate_sml
 
@@ -22,6 +25,18 @@ def _read_sml_directory(root: Path) -> dict[str, str]:
         if path.is_file() and path.suffix.lower() in _YAML_SUFFIXES:
             files[str(path.relative_to(root))] = path.read_text(encoding="utf-8")
     return files
+
+
+def write_files(root: Path, files: list[dict[str, str]]) -> int:
+    """Writes a /sml/generate-shaped `[{name, body}]` file list under `root`.
+    Shared by /sml/save and publish.py's deploy pipeline so both stage into
+    the same directory layout."""
+    root.mkdir(parents=True, exist_ok=True)
+    for f in files:
+        p = root / f["name"]
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f["body"], encoding="utf-8")
+    return len(files)
 
 
 @sml_bp.post("/sml/generate")
@@ -67,12 +82,102 @@ def save_path():
         return jsonify({"error": "Missing 'path' or 'files'"}), 400
 
     root = Path(raw_path).expanduser()
-    root.mkdir(parents=True, exist_ok=True)
-    for f in files:
-        p = root / f["name"]
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(f["body"], encoding="utf-8")
-    return jsonify({"ok": True, "path": str(root), "count": len(files)})
+    count = write_files(root, files)
+    return jsonify({"ok": True, "path": str(root), "count": count})
+
+
+@sml_bp.post("/sml/save")
+def save():
+    """Writes generated SML files into this model's workspace directory
+    (workspace/<slugified-model-name>/) - the default, no-path-typing save
+    path. Same destination publish.py's deploy pipeline stages into, so
+    Save and Deploy operate on one persistent working copy per model."""
+    payload = request.get_json(force=True, silent=True) or {}
+    model_name = payload.get("modelName")
+    files = payload.get("files")
+    if not model_name or not files:
+        return jsonify({"error": "Missing 'modelName' or 'files'"}), 400
+    if not is_valid_model_name(model_name):
+        return jsonify({"error": f"'{model_name}' is not a valid model name - use letters, numbers, '-' or '_' only"}), 400
+
+    root = model_workspace_dir(model_name)
+    count = write_files(root, files)
+    return jsonify({"ok": True, "path": str(root), "count": count})
+
+
+def _strip_credentials(url: str) -> str:
+    """Drops a `user:token@` userinfo segment - origin remotes in this app
+    always carry embedded credentials (see import_git/git_ops.push_sml_to_repo),
+    which must never reach the browser."""
+    import re
+
+    return re.sub(r"^(https?://)[^/@]+@", r"\1", url)
+
+
+def _git_remote_of(path: Path) -> tuple[str, str] | None:
+    """(url, branch) of `path`'s origin remote, if it's a real git clone -
+    e.g. one /sml/import-git cloned directly into the workspace. Lets the
+    Load tab's workspace picker resume a pulled model as an update (commit +
+    push to the same history) instead of publish.py treating it as a brand
+    new repo and getting a non-fast-forward rejection."""
+    if not (path / ".git").exists():
+        return None
+    from git import InvalidGitRepositoryError, Repo
+
+    try:
+        repo = Repo(str(path))
+        if "origin" not in [r.name for r in repo.remotes]:
+            return None
+        url = _strip_credentials(next(repo.remotes.origin.urls))
+        branch = repo.active_branch.name if not repo.head.is_detached else "main"
+        return url, branch
+    except (InvalidGitRepositoryError, TypeError, ValueError):
+        return None
+
+
+@sml_bp.get("/sml/models")
+def list_workspace_models():
+    """Lists models already saved under the workspace root, for the Load
+    tab's local-workspace picker - no manual path typing required."""
+    if not WORKSPACE_ROOT.is_dir():
+        return jsonify([])
+    out = []
+    for child in sorted(WORKSPACE_ROOT.iterdir()):
+        if child.is_dir() and _read_sml_directory(child):
+            entry: dict[str, Any] = {"name": child.name, "path": str(child)}
+            remote = _git_remote_of(child)
+            if remote:
+                entry["gitRepoUrl"], entry["gitBranch"] = remote
+            out.append(entry)
+    return jsonify(out)
+
+
+@sml_bp.get("/sml/repos")
+def list_attached_repos():
+    """Joins AtScale's /wapi/p/repo (repo url/branch) with
+    /wapi/p/projects/deployed (repo -> projects -> models) so the Load tab's
+    AtScale picker can show real project/model names, not just raw repo
+    URLs - both calls already exist in atscale/client.py, this just combines
+    them for the frontend."""
+    client = get_client()
+    if not client:
+        return jsonify({"error": "Not authenticated"}), 401
+
+    repos = client.list_repos()
+    deployed = {d.get("repoId"): d for d in client.list_deployed_projects()}
+    out = []
+    for repo in repos:
+        entry = deployed.get(repo.get("id"), {})
+        out.append(
+            {
+                "repoId": repo.get("id"),
+                "name": repo.get("name"),
+                "url": repo.get("url"),
+                "branch": repo.get("defaultBranch") or "main",
+                "projects": entry.get("projects", []),
+            }
+        )
+    return jsonify(out)
 
 
 @sml_bp.post("/sml/import")
@@ -110,7 +215,14 @@ def import_path():
 def import_git():
     """Clone (or pull, if already cached) the Git repo AtScale is linked to,
     then import the SML it contains. Credentials come from connections.yaml's
-    `git` connection - see docs/BUILD_PLAN.md / CLAUDE.md for the schema."""
+    `git` connection - see docs/BUILD_PLAN.md / CLAUDE.md for the schema.
+
+    When `modelName` is given (the Load tab's curated repo picker always
+    sends it), clones directly into that model's workspace directory instead
+    of the anonymous `.data/git-cache/` - the *same* directory Save/Deploy
+    use, so a later Deploy commits on top of real cloned history and does a
+    normal fast-forward push instead of re-`git init`-ing a disconnected
+    history and getting rejected as non-fast-forward."""
     import shutil
 
     from git import GitCommandError, Repo
@@ -122,6 +234,7 @@ def import_git():
     branch = payload.get("branch") or git_conn.get("branch") or "main"
     username = git_conn.get("username")
     token = git_conn.get("token")
+    model_name = payload.get("modelName")
 
     if not repo_url:
         return jsonify({"error": "No repo URL - pass 'repoUrl' or set connections.<name>.git.repo"}), 400
@@ -131,21 +244,31 @@ def import_git():
         auth = f"{username}:{token}" if username else token
         auth_url = repo_url.replace("https://", f"https://{auth}@", 1)
 
-    cache_dir = Path(__file__).resolve().parent.parent / ".data" / "git-cache"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    repo_dir = cache_dir / "".join(c if c.isalnum() else "_" for c in repo_url)
+    if model_name:
+        repo_dir = model_workspace_dir(model_name)
+    else:
+        cache_dir = Path(__file__).resolve().parent.parent / ".data" / "git-cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        repo_dir = cache_dir / "".join(c if c.isalnum() else "_" for c in repo_url)
 
     try:
-        if repo_dir.exists():
+        if (repo_dir / ".git").exists():
             repo = Repo(str(repo_dir))
             repo.remotes.origin.set_url(auth_url)
             repo.remotes.origin.fetch()
             repo.git.checkout(branch)
             repo.remotes.origin.pull()
         else:
-            Repo.clone_from(auth_url, str(repo_dir), branch=branch)
+            repo = Repo.clone_from(auth_url, str(repo_dir), branch=branch)
+        # Workspace/<model> is a visible, user-browsable directory (unlike the
+        # old hidden .data/git-cache) - don't leave the token embedded in its
+        # .git/config once the operation's done. push_sml_to_repo re-injects
+        # it before every push regardless, so this is safe to clear here.
+        if model_name:
+            repo.remotes.origin.set_url(repo_url)
     except GitCommandError as e:
-        shutil.rmtree(repo_dir, ignore_errors=True)
+        if not model_name:
+            shutil.rmtree(repo_dir, ignore_errors=True)
         return jsonify({"error": f"Git operation failed: {e}"}), 502
 
     files = _read_sml_directory(repo_dir)

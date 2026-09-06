@@ -9,18 +9,17 @@ spaces replaced with dashes).
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 
 import requests
 from git import GitCommandError, Repo
 
+from smlgen.naming import slugify_model_name
 
-def slugify_repo_name(model_name: str) -> str:
-    slug = re.sub(r"\s+", "-", model_name.strip())
-    slug = re.sub(r"[^A-Za-z0-9._-]", "", slug)
-    return slug or "sml-model"
+# Kept as an alias - this is the same slug rule the workspace save path uses
+# (smlgen/naming.py), just under the name existing callers (publish.py) import.
+slugify_repo_name = slugify_model_name
 
 
 def ensure_github_repo(username: str, token: str, repo_name: str, private: bool = True) -> dict[str, Any]:
@@ -96,6 +95,11 @@ def push_sml_to_repo(
         push_infos = repo.remotes.origin.push(refspec=f"{branch}:{branch}", set_upstream=True)
     except GitCommandError as e:
         raise RuntimeError(f"git push failed: {e}") from e
+    finally:
+        # local_dir is workspace/<model> - a visible, user-browsable directory,
+        # not a hidden cache dir - don't leave the token embedded in its
+        # .git/config once the push attempt is done (success or failure).
+        repo.remotes.origin.set_url(clone_url)
 
     # GitPython's push() does not raise on a rejected/errored push - it only
     # returns a PushInfoList with per-ref flags that must be checked.

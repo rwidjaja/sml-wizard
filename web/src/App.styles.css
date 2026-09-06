@@ -48,6 +48,16 @@
   background: var(--as-panel);
 }
 
+.model-name-input {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid var(--as-muted-30);
+  background: var(--as-panel);
+  color: var(--as-ink);
+  min-width: 180px;
+}
+
 .eyebrow {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -104,6 +114,15 @@
 
 .btn-primary:hover {
   background: #1f8fae;
+}
+
+/* Highlights the specific Load-tab item currently being retrieved, so
+   picking a model/repo gives visible feedback instead of the whole list
+   just going generically disabled. */
+.btn-loading {
+  border-color: var(--as-fact);
+  background: var(--as-selected-row);
+  color: var(--as-ink-strong);
 }
 
 .app-body {

@@ -86,6 +86,11 @@ export interface GenerateSmlPayload {
   joins: unknown[]
   cfg: Record<string, unknown>
   calculations?: unknown[]
+  /** Set when this model was loaded from an AtScale-attached repo - deploy
+   *  pushes back to this exact repo/branch instead of computing a new
+   *  slug-derived repo name, which would create an unrelated duplicate repo. */
+  gitRepoUrl?: string
+  gitBranch?: string
 }
 
 export interface DeploySteps {
@@ -173,7 +178,7 @@ export function importSmlPath(path: string) {
   return request<ImportedModel>('/sml/import-path', { method: 'POST', body: JSON.stringify({ path }) })
 }
 
-export function importSmlGit(payload: { repoUrl?: string; branch?: string; connectionName?: string }) {
+export function importSmlGit(payload: { repoUrl?: string; branch?: string; connectionName?: string; modelName?: string }) {
   return request<ImportedModel>('/sml/import-git', { method: 'POST', body: JSON.stringify(payload) })
 }
 
@@ -184,6 +189,49 @@ export function saveSmlToPath(path: string, files: SmlFile[]) {
     method: 'POST',
     body: JSON.stringify({ path, files }),
   })
+}
+
+/** Default save path: writes into workspace/<slugified-model-name>/ on the
+ *  API server - no manual path typing. Same directory publish/deploy stages
+ *  into, so Save and Deploy share one working copy per model. */
+export function saveSml(modelName: string, files: SmlFile[]) {
+  return request<{ ok: boolean; path: string; count: number }>('/sml/save', {
+    method: 'POST',
+    body: JSON.stringify({ modelName, files }),
+  })
+}
+
+export interface WorkspaceModel {
+  name: string
+  path: string
+  /** Present when this workspace directory is a real git clone (created by
+   *  importSmlGit's modelName-targeted clone) - lets Load resume it as an
+   *  update (commit on top of real history) rather than a brand new repo. */
+  gitRepoUrl?: string
+  gitBranch?: string
+}
+
+export function fetchWorkspaceModels() {
+  return request<WorkspaceModel[]>('/sml/models')
+}
+
+export interface AttachedRepoProject {
+  id: string
+  name: string
+  caption?: string
+  models?: { id: string; name: string; caption?: string }[]
+}
+
+export interface AttachedRepo {
+  repoId: string
+  name: string
+  url: string
+  branch: string
+  projects: AttachedRepoProject[]
+}
+
+export function fetchAttachedRepos() {
+  return request<AttachedRepo[]>('/sml/repos')
 }
 
 // -- Cube data preview (Preview tab) -----------------------------------------

@@ -156,5 +156,8 @@ api/connections.yaml
 # Saved model state (local dev persistence, not shared)
 api/.data/
 
+# Per-model working checkouts (Save/Deploy staging) - not wizard source
+/workspace/
+
 # start.sh logs/pids
 .logs/
