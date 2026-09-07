@@ -47,26 +47,45 @@ it.
   gray otherwise). Clicking a fact-involved join opens a role-play prompt
   (e.g. "Order", "Ship" for two date FKs on one fact joined to the same
   conformed date dimension); deleting a join is a separate, explicit action
-  (a small ✕ badge at the join's midpoint) so you can't lose a join by
-  accident while trying to label it.
+  (a small ✕ badge at the join's midpoint, itself clickable even though the
+  join line beneath it isn't) so you can't lose a join by accident while
+  trying to label it.
+- **Drawing a join auto-creates the hierarchy level it needs.** The
+  dimension-side column you just joined becomes the hierarchy's first level
+  (L1) immediately — Display name and Query name seeded too — instead of
+  only existing implicitly once SML is generated. Anything you mark as a
+  level afterward stacks after it (L2, L3, ...); reorder any of them with
+  the hierarchy readout's up/down controls.
 - Build hierarchies of **arbitrary depth** (2 levels or 8+, not a fixed
   L1/L2/L3) by marking any number of columns as "Hierarchy level" on a
-  dimension table, and reorder them with the hierarchy readout's up/down
-  controls.
+  dimension table.
 - Add secondary attributes and level aliases, attached to whichever level you
   actually built (the attach-to-level list is always generated from the
-  current hierarchy, never a fixed set of choices).
+  current hierarchy, never a fixed set of choices). Remove any metric,
+  level, secondary attribute, or alias directly from the Column Inspector's
+  summary lists with its own ✕ control — no need to re-select the source
+  column just to un-mark it.
 - Per level/secondary/alias, independently override the **key column**
   (join/identity), **value column** (what's shown to users), and **query
   name** (the SML `unique_name`) when they differ from the column you
   clicked — e.g. mark `year` as the level, key it on `datekey`, and show
   `year_name` to users. All three default to the clicked column if left
-  alone.
+  alone; if you don't set a key column and the fact's join lands on a
+  different column anyway (the common surrogate-key-join pattern — join on
+  `productkey`, display `englishproductname`), the generator resolves the
+  level's real key from the join automatically.
 - Mark a dimension as a time dimension (emits SML `type: time` with
   `time_unit` on each level).
 - On a fact table, create metrics (aggregate function + display/query name)
   or degenerate dimensions (expose a fact column as an attribute with no
   separate dimension table) per column.
+
+**Preview**
+- Browse any catalog/cube AtScale has deployed (not limited to ones this
+  wizard generated) and run an ad-hoc MDX or SQL query against it — drag
+  dimensions/hierarchies and measures in, execute, see results in a table.
+  Useful both for sanity-checking a model you just deployed and for
+  exploring an existing one.
 
 **Generate & validate**
 - "Generate SML" builds the full repository (catalog, connections, datasets,
@@ -82,21 +101,36 @@ it.
   against two real, hand-built SML repos pulled from a live AtScale
   instance — see `api/smlgen/build.py`'s module docstring for the specific
   points where the real repos disagreed with the initial assumptions.
+- Every hierarchy level and secondary attribute is compiled into the
+  *deployed cube* correctly, not just the generated SML — including a level
+  whose join/identity column differs from its display column, and levels
+  beyond the one column a fact directly joins to. Verified by actually
+  querying a deployed model's data, not just checking the YAML shape: an
+  earlier version of the legacy-XML compiler silently dropped every level
+  but the join target and every secondary attribute from the compiled cube,
+  even when the generated SML itself was correct.
 
 **Save, load, and deploy — all just SML**
 - There's no separate proprietary save format. "Save" generates the SML and
-  writes it to a directory; "Load" imports an existing SML repository —
-  from a local directory, or by pulling the Git repo configured in
-  `connections.yaml` — and reconstructs the canvas model from it (nodes,
-  joins, roles, hierarchies, secondary attributes, key/value/query
-  overrides, role-play, time dimensions).
+  writes it to `workspace/<model-name>/` by default (the name is
+  auto-slugified to letters/numbers/`-`/`_` as you type — spaces become
+  dashes); "Load" offers a picker over models already saved there and over
+  repos AtScale currently has attached (real project/model names, not just
+  raw repo URLs), with an advanced fallback to load from an arbitrary local
+  path or Git URL by hand.
+- Loading a model that came from an AtScale-attached repo remembers that
+  repo's URL/branch, so editing it and hitting Deploy again **updates that
+  same repo** (a normal fast-forward push on top of its real history) —
+  it doesn't try to create an unrelated new one, and doesn't fail with a
+  non-fast-forward rejection the way treating every deploy as brand-new
+  would.
 - "Deploy" runs the full pipeline in one click: generate → save to disk →
   create (or reuse) the model's own GitHub repo and push the SML to it →
   attach that repo to AtScale → compile the legacy catalog XML AtScale's
   deploy endpoint requires and deploy it. Verified end-to-end against a
   real AtScale instance and GitHub, including idempotent re-deploy (an
   unchanged model reuses the existing project instead of creating a
-  duplicate).
+  duplicate) and updating an existing repo pulled from AtScale.
 
 ## Known limitations
 
@@ -122,6 +156,14 @@ it.
 - **No calculated metrics (MDX) authoring.** The wizard covers base metrics,
   degenerate dimensions, and standard/time dimensions; SML `metric_calc`
   objects and MDX expressions aren't modeled in the UI.
+- **A fact table joined to more than one dimension may only get one of
+  those joins correctly wired into the deployed cube's own data-set
+  reference.** The legacy-XML compiler's cube-level wiring (as opposed to
+  the per-dimension XML, which does handle every joined dimension
+  correctly) carries over a ps-utils simplification that assumes a single
+  join per fact dataset overall — worth verifying end-to-end (not just
+  checking the generated SML) for any model with more than one dimension
+  before relying on it in production.
 - **Deploy's Git step targets GitHub specifically** (repo creation and push
   use the GitHub REST API and a personal access token); other Git hosts
   aren't wired up.
