@@ -391,6 +391,24 @@ export const useModelStore = create<ModelState>((set, get) => ({
     )
     if (exists) return
     set((s) => ({ joins: [...s.joins, { id: `j${seq++}`, a, b }] }))
+
+    // Auto-mark the dimension-side join column as a hierarchy level (L1) if
+    // it isn't configured as anything yet - the join's key column is the
+    // natural anchor for this table's hierarchy (matches the SML generator's
+    // own key_columns handling), so it should be visible/editable in the
+    // Inspector immediately instead of silently existing only once SML is
+    // generated. Anything the user marks afterward stacks after it as L2, L3, ...
+    const state = get()
+    const aNode = state.nodes.find((n) => n.id === a.node)
+    const bNode = state.nodes.find((n) => n.id === b.node)
+    const dimSide = aNode?.role === 'dimension' ? a : bNode?.role === 'dimension' ? b : null
+    if (dimSide) {
+      const key = columnKey(dimSide.node, dimSide.column)
+      const existingCfg = state.cfg[key]
+      if (!existingCfg?.dimRole || existingCfg.dimRole === 'none') {
+        get().setColumnDimRole(dimSide.node, key, 'level')
+      }
+    }
   },
 
   removeJoin: (id) => set((s) => ({ joins: s.joins.filter((j) => j.id !== id) })),
