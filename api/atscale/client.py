@@ -266,6 +266,16 @@ class AtScaleClient:
             body["defaultBranch"] = default_branch
         return self._dispatch("POST", "/wapi/p/repo", json=body).json()
 
+    def delete_repo(self, repo_id: str) -> dict[str, Any]:
+        """Unregisters a repo attachment (/wapi/p/repo/{id}) - not documented
+        in ps-utils (which only ever connects/lists), but confirmed to exist
+        and work against a real instance. Doesn't touch the actual Git repo
+        or anything already deployed from it - just AtScale's own record
+        that it's attached, e.g. for cleaning up a repo whose Git side has
+        since been deleted."""
+        resp = self._dispatch("DELETE", f"/wapi/p/repo/{repo_id}")
+        return resp.json() if resp.text else {}
+
     # -- deployments -------------------------------------------------------------------
     def list_deployed_projects(self) -> list[dict[str, Any]]:
         return self._dispatch("GET", "/wapi/p/projects/deployed").json()

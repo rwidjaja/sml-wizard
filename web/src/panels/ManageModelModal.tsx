@@ -8,6 +8,7 @@ import {
   importSmlPath,
   saveSml,
   SmlValidationFailure,
+  unlinkAttachedRepo,
   type AttachedRepo,
   type ImportedModel,
   type WorkspaceModel,
@@ -189,6 +190,29 @@ export function ManageModelModal({ onClose }: Props) {
     }
   }
 
+  /** Removes a now-broken "attached" entry (e.g. its GitHub repo was deleted
+   *  outside the wizard) from AtScale's own repo-attachment record - doesn't
+   *  touch anything already deployed, just lets the Load tab's list recover
+   *  instead of showing a dead entry forever. */
+  async function handleUnlinkRepo(repo: AttachedRepo) {
+    if (!window.confirm(`Unlink "${repo.name}" from AtScale? This only removes AtScale's repo attachment record, not anything already deployed.`)) {
+      return
+    }
+    setBusy(true)
+    setLoadingKey(`unlink:${repo.repoId}`)
+    setError(null)
+    try {
+      await unlinkAttachedRepo(repo.repoId)
+      setAttachedRepos((prev) => prev.filter((r) => r.repoId !== repo.repoId))
+      setStatus(`Unlinked "${repo.name}".`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+      setLoadingKey(null)
+    }
+  }
+
   // The path field is read directly by the API server (which runs on the
   // same machine as the SML repo, unlike the browser) - no file picker needed.
   async function handleImportPath() {
@@ -339,29 +363,39 @@ export function ManageModelModal({ onClose }: Props) {
                   {attachedRepos.map((r) => {
                     const key = `repo:${r.repoId}`
                     const isLoading = loadingKey === key
+                    const isUnlinking = loadingKey === `unlink:${r.repoId}`
                     return (
-                      <button
-                        key={r.repoId}
-                        className={`btn btn-ghost ${isLoading ? 'btn-loading' : ''}`}
-                        style={{ justifyContent: 'flex-start' }}
-                        disabled={busy}
-                        onClick={() => handleLoadRepo(r)}
-                        title={r.url}
-                      >
-                        {isLoading ? (
-                          `Retrieving ${r.name}…`
-                        ) : (
-                          <>
-                            {r.name}
-                            {r.projects.length > 0 && (
-                              <span style={{ opacity: 0.6 }}>
-                                {' '}
-                                — {r.projects.map((p) => p.name).join(', ')}
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </button>
+                      <div key={r.repoId} style={{ display: 'flex', gap: 4 }}>
+                        <button
+                          className={`btn btn-ghost ${isLoading ? 'btn-loading' : ''}`}
+                          style={{ justifyContent: 'flex-start', flex: 1 }}
+                          disabled={busy}
+                          onClick={() => handleLoadRepo(r)}
+                          title={r.url}
+                        >
+                          {isLoading ? (
+                            `Retrieving ${r.name}…`
+                          ) : (
+                            <>
+                              {r.name}
+                              {r.projects.length > 0 && (
+                                <span style={{ opacity: 0.6 }}>
+                                  {' '}
+                                  — {r.projects.map((p) => p.name).join(', ')}
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </button>
+                        <button
+                          className="btn btn-ghost"
+                          disabled={busy}
+                          onClick={() => handleUnlinkRepo(r)}
+                          title="Unlink this repo from AtScale (e.g. its Git repo was deleted elsewhere)"
+                        >
+                          {isUnlinking ? '…' : '✕'}
+                        </button>
+                      </div>
                     )
                   })}
                 </div>

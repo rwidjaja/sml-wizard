@@ -180,6 +180,22 @@ def list_attached_repos():
     return jsonify(out)
 
 
+@sml_bp.delete("/sml/repos/<repo_id>")
+def unlink_attached_repo(repo_id: str):
+    """Unregisters a repo AtScale still lists as attached even though its
+    actual Git side is gone (e.g. the GitHub repo was deleted) - lets the
+    Load tab's picker clean up a now-broken entry instead of it sitting
+    there permanently pointing at nothing."""
+    client = get_client()
+    if not client:
+        return jsonify({"error": "Not authenticated"}), 401
+    try:
+        client.delete_repo(repo_id)
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"error": str(e)}), 502
+    return jsonify({"ok": True})
+
+
 @sml_bp.post("/sml/import")
 def import_files():
     """Import an SML model from an explicit set of {name, body} files - the

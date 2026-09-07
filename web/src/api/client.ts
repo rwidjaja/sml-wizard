@@ -234,6 +234,13 @@ export function fetchAttachedRepos() {
   return request<AttachedRepo[]>('/sml/repos')
 }
 
+/** Unregisters a repo AtScale still lists as attached even though its
+ *  actual Git side is gone (e.g. the GitHub repo was deleted) - only
+ *  removes AtScale's own attachment record, not anything already deployed. */
+export function unlinkAttachedRepo(repoId: string) {
+  return request<{ ok: boolean }>(`/sml/repos/${encodeURIComponent(repoId)}`, { method: 'DELETE' })
+}
+
 // -- Cube data preview (Preview tab) -----------------------------------------
 
 export interface CatalogCube {
