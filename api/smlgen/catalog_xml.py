@@ -115,10 +115,26 @@ def build_catalog_xml(
             key_id = _gen_id(ns, f"{dim_name}.{rel['toLevel']}.key")
             attr_id = _gen_id(ns, f"{dim_name}.{rel['toLevel']}.attr")
             ds_id = _gen_id(ns, la.get("dataset") or "")
+            # SML lets a level's join/identity column (key_columns) differ
+            # from its display column (name_column) - e.g. join on the
+            # surrogate key `productkey` but show `englishproductname`
+            # (confirmed correct and required: sales-insights-postgres'
+            # hand-authored "Product Name" level does exactly this and
+            # queries fine). The legacy catalog XML has two separate
+            # elements for this - <key-ref> (what the fact's FK actually
+            # joins against) and <attribute-ref> (what's displayed) - so
+            # they need their own column, not one shared `columnName`
+            # defaulting to name_column: that previously made the compiled
+            # XML join the fact's int/bigint FK against a text display
+            # column whenever the two differed, producing a runtime
+            # "operator does not exist: bigint = text" from the SQL engine.
+            key_col = (la.get("key_columns") or [la["unique_name"]])[0]
+            attr_col = la.get("name_column") or key_col
             ka = {
                 "laUniqueName": la["unique_name"],
                 "datasetName": la.get("dataset") or "",
-                "columnName": la.get("name_column") or (la.get("key_columns") or [la["unique_name"]])[0],
+                "keyColumnName": key_col,
+                "attrColumnName": attr_col,
                 "label": la.get("label") or la["unique_name"],
                 "keyId": key_id,
                 "attrId": attr_id,
@@ -238,10 +254,10 @@ def build_catalog_xml(
     </physical>
     <logical>
       <key-ref id="{ka['keyId']}" unique="false" complete="true">
-        <column>{_esc(ka['columnName'])}</column>
+        <column>{_esc(ka['keyColumnName'])}</column>
       </key-ref>
       <attribute-ref id="{ka['attrId']}" complete="true">
-        <column>{_esc(ka['columnName'])}</column>
+        <column>{_esc(ka['attrColumnName'])}</column>
       </attribute-ref>
     </logical>
   </data-set>"""

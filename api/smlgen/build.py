@@ -308,17 +308,17 @@ def build_sml(payload: dict[str, Any]) -> dict[str, str]:
 
         # A join landing on a column no visible level's own key covers (e.g. a
         # fact FK joined to a dimension's surrogate key while the user only
-        # marked a *display* column, like a name, as the level) attaches to
-        # the LEAF level as an extra secondary attribute, keyed by that join
-        # column - matching the real repo's own pattern (sales-insights-
-        # postgres' "Product Name" level: key_columns=[productkey],
-        # name_column=englishproductname) rather than a separate hierarchy
-        # level. Confirmed two ways against a real deploy: adding it as a
-        # *second level* instead made AtScale drop the display level from
-        # XMLA discovery entirely (whether or not that extra level was
-        # `is_hidden`) - only a same-level secondary attribute keeps both
-        # names browsable, which is what a user actually wants (dimRole
-        # 'secondary' already means exactly "hangs off a level, same grain").
+        # marked a *display* column, like a name, as the level) repoints the
+        # LEAF level's key_columns at that join column directly - the level
+        # the user clicked (englishproductname) stays the display/name_column,
+        # the real join grain (productkey) becomes key_columns, no separate
+        # level or secondary attribute needed - matching the real repo's own
+        # pattern exactly (sales-insights-postgres' "Product Name" level:
+        # key_columns=[productkey], name_column=englishproductname, nothing
+        # else). Confirmed against a real deploy that adding productkey as
+        # *either* a second level or a secondary attribute of this level made
+        # AtScale drop the display level from XMLA discovery entirely - it
+        # must be only the key_columns override, nothing more.
         anchor_col = next(iter(sorted(hidden_levels_needed.get(n["id"], ()))), None)
 
         level_entries = []
@@ -353,18 +353,6 @@ def build_sml(payload: dict[str, Any]) -> dict[str, str]:
                 if s_sort_col:
                     s_attr["sort_column"] = s_sort_col
                 secondary_attrs.append(s_attr)
-
-            if is_leaf and anchor_col and anchor_col != lv["column"]:
-                anchor_name = cased(anchor_col, dialect)
-                secondary_attrs.append(
-                    {
-                        "unique_name": anchor_name,
-                        "label": anchor_name,
-                        "dataset": table,
-                        "key_columns": [anchor_name],
-                        "name_column": anchor_name,
-                    }
-                )
 
             level_entry: dict[str, Any] = {"unique_name": col}
             if secondary_attrs:
