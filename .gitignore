@@ -145,7 +145,7 @@ dmypy.json
 # Profiling
 .prof
 .profile
-
+./workspace/*
 # Claude Code local session state
 .claude/
 
@@ -157,7 +157,7 @@ api/connections.yaml
 api/.data/
 
 # Per-model working checkouts (Save/Deploy staging) - not wizard source
-/workspace/
+/workspace/*
 
 # start.sh logs/pids
 .logs/
