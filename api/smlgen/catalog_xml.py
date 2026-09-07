@@ -97,6 +97,30 @@ def build_catalog_xml(
     ref_dim_names = {r["toDimension"] for r in relationships if r["toDimension"]}
     fact_dataset_names = {r["fromDataset"] for r in relationships if r["fromDataset"]}
 
+    # NOTE on dim<->dim "embedded" relationships (e.g. Customer Dimension ->
+    # Geography Dimension via geographykey, declared on the dimension's own
+    # file): confirmed via a live deploy AND AtScale's own UI (a real
+    # "Geography City" hierarchy screenshot: one dimension, one hierarchy,
+    # 4 levels, each level backed by a *different* dataset, chained via
+    # `type: snowflake` relationships with a visible link icon between
+    # adjacent levels) that AtScale has no concept of two independent
+    # top-level dimensions cross-linked to each other at all. A snowflaked
+    # table's levels belong *inside* the referencing dimension's own
+    # hierarchy, spanning multiple datasets - not a second, separate
+    # `object_type: dimension`. This wizard's canvas is one-physical-table-
+    # per-node, so it can't author that shape (see README's "Known
+    # limitations" - already documented, not new). An attempt to compile the
+    # "embedded" relationship type this wizard's own generator invents (not
+    # a real AtScale/ps-utils concept - confirmed absent from both) into a
+    # second, cross-linked <dimension> was tried here and reverted: AtScale
+    # reported the snowflaked dimension "not found" in the cube regardless
+    # of how the key-ref chain was wired, because it was never going to be
+    # attached as its own dimension in the first place. Fixing this for real
+    # needs build.py to merge a dim<->dim join's target into the *same*
+    # dimension's hierarchy (multiple levels, multiple datasets, `type:
+    # snowflake`) instead of generating a separate dimension object - a
+    # bigger change to the node/hierarchy model itself, not this compiler.
+
     # -- keyed attributes: one per level_attribute *and* per secondary
     # attribute, across every referenced dimension - not just the one level
     # each fact relationship directly joins to. Confirmed against a real
@@ -142,10 +166,9 @@ def build_catalog_xml(
 
     keyed_attrs: list[dict[str, Any]] = []
     # level unique_name -> its own ka (not a secondary's) - for the <level
-    # primary-attribute="..."> reference in the dimensions XML below.
+    # primary-attribute="..."> reference below, and for resolving each fact
+    # relationship's join target in the cube's data-set-ref further down.
     own_ka_by_level: dict[str, dict[str, Any]] = {}
-    # rel["toLevel"] -> its ka, for resolving each fact relationship's join.
-    keyed_attr_by_level: dict[str, dict[str, Any]] = {}
     # level unique_name -> [ka, ...] for its secondary_attributes, so the
     # hierarchy XML can emit <keyed-attribute-ref> under the right <level>.
     secondary_kas_by_level: dict[str, list[dict[str, Any]]] = {}
@@ -169,9 +192,6 @@ def build_catalog_xml(
                 keyed_attrs.append(ka)
                 own_ka_by_level[level_name] = ka
                 kas_by_dataset.setdefault(ka["datasetName"], []).append(ka)
-                for rel in relationships:
-                    if rel["toDimension"] == dim_name and rel["toLevel"] == level_name:
-                        keyed_attr_by_level[level_name] = ka
 
                 for sec in level.get("secondary_attributes") or []:
                     sec_la = la_map.get(sec["unique_name"]) or sec
@@ -186,12 +206,38 @@ def build_catalog_xml(
         ds = datasets_map.get(ds_name)
         if not ds:
             continue
+        # Every relationship from this fact dataset needs its own <key-ref>
+        # in the cube's data-set-ref (confirmed against a real legacy
+        # project XML, atscale-xml-sml/enterprise_sales.xml: a fact dataset
+        # joined to two dimensions has two <key-ref> elements, each with the
+        # id of the *target level's own* attribute-key and the fact's own
+        # join column) - picking only the first relationship's join column
+        # (this dict's old single `joinColName` field) silently left every
+        # dimension after the first one unwired from the cube, even though
+        # its own dimension/level/dataset XML was otherwise correct.
+        # De-duplicated by target level: a role-played relationship (the
+        # same level joined via more than one FK, e.g. Order/Ship dates)
+        # needs the `<ref-path>` mechanism this compiler doesn't implement
+        # yet to represent more than one such join without id collisions -
+        # so only the first join to a given level is wired here for now,
+        # same limitation as before, just no longer affecting every *other*
+        # dimension too.
+        seen_levels: set[tuple[str, str]] = set()
+        joins: list[dict[str, str]] = []
+        for r in relationships:
+            if r["fromDataset"] != ds_name or not r["joinColumns"]:
+                continue
+            level_key = (r["toDimension"], r["toLevel"])
+            if level_key in seen_levels:
+                continue
+            seen_levels.add(level_key)
+            joins.append({"toDimension": r["toDimension"], "toLevel": r["toLevel"], "joinColumn": r["joinColumns"][0]})
         fact_datasets[ds_name] = {
             "datasetName": ds_name,
             "ds": ds,
             "dsId": _gen_id(ns, ds_name),
             "metrics": [],
-            "joinColName": next((r["joinColumns"][0] for r in relationships if r["fromDataset"] == ds_name and r["joinColumns"]), None),
+            "joins": joins,
         }
 
     model_cube_name = model.get("unique_name") or model.get("label") or "model"
@@ -370,20 +416,20 @@ def build_catalog_xml(
             )
     measure_attrs_xml = "".join(measure_attrs_parts)
 
-    # keyed_attrs now also holds every non-join level and secondary
-    # attribute (see above) - keyed_attrs[0] would no longer reliably be an
-    # actual join target. keyed_attr_by_level is still scoped to only real
-    # relationship targets, preserving the original "assume a single join
-    # key" simplification's behavior (ps-utils' own docstring already flags
-    # this as fine only for one join per fact-dimension pair - unchanged
-    # here, not what this fix is about).
-    join_ka = next(iter(keyed_attr_by_level.values()), None)
     cube_ds_refs_parts = []
     for fde in fact_datasets.values():
-        key_ref = (
-            f"\n          <key-ref id=\"{join_ka['keyId']}\" unique=\"false\" complete=\"false\"><column>{_esc(fde.get('joinColName') or '')}</column></key-ref>"
-            if join_ka
-            else ""
+        # One <key-ref> per dimension this fact dataset actually joins to -
+        # each keyed by that *target level's own* attribute-key id (matching
+        # a real legacy project XML's pattern for a fact joined to more than
+        # one dimension: multiple <key-ref> elements, one per dimension,
+        # each carrying the target's key id and this fact's own join
+        # column). Using a single id for every join here before this fix
+        # left every dimension but one unwired from the cube.
+        key_refs = "".join(
+            f"\n          <key-ref id=\"{ka['keyId']}\" unique=\"false\" complete=\"false\"><column>{_esc(j['joinColumn'])}</column></key-ref>"
+            for j in fde["joins"]
+            for ka in [own_ka_by_level.get(j["toLevel"])]
+            if ka
         )
         attr_refs = "".join(
             f"\n          <attribute-ref id=\"{m['attrId']}\" complete=\"true\"><column>{_esc(m['column'])}</column></attribute-ref>"
@@ -392,7 +438,7 @@ def build_catalog_xml(
         cube_ds_refs_parts.append(
             f"""
     <data-set-ref id="{fde['dsId']}">
-      <logical>{key_ref}{attr_refs}
+      <logical>{key_refs}{attr_refs}
       </logical>
     </data-set-ref>"""
         )

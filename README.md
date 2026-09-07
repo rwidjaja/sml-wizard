@@ -109,6 +109,12 @@ it.
   earlier version of the legacy-XML compiler silently dropped every level
   but the join target and every secondary attribute from the compiled cube,
   even when the generated SML itself was correct.
+- A fact table joined to several dimensions gets every one of those joins
+  wired into the deployed cube, not just the first — verified by querying
+  two independently joined dimensions off the same fact and getting correct,
+  distinct results for each. (A fact-to-*dimension* join, not the
+  dimension-to-dimension "snowflake" case in Known limitations below, which
+  is a different, still-unsupported pattern.)
 
 **Save, load, and deploy — all just SML**
 - There's no separate proprietary save format. "Save" generates the SML and
@@ -156,14 +162,21 @@ it.
 - **No calculated metrics (MDX) authoring.** The wizard covers base metrics,
   degenerate dimensions, and standard/time dimensions; SML `metric_calc`
   objects and MDX expressions aren't modeled in the UI.
-- **A fact table joined to more than one dimension may only get one of
-  those joins correctly wired into the deployed cube's own data-set
-  reference.** The legacy-XML compiler's cube-level wiring (as opposed to
-  the per-dimension XML, which does handle every joined dimension
-  correctly) carries over a ps-utils simplification that assumes a single
-  join per fact dataset overall — worth verifying end-to-end (not just
-  checking the generated SML) for any model with more than one dimension
-  before relying on it in production.
+- **A dimension-to-dimension ("snowflake") join drawn on the canvas between
+  two separate table nodes can't actually be deployed as a working link.**
+  Confirmed against a real AtScale instance, both by testing and by
+  AtScale's own UI: it has no concept of two independent dimensions
+  cross-linked to each other at all — a snowflaked table's levels have to
+  live *inside* the referencing dimension's own hierarchy (multiple levels,
+  each backed by a different dataset, chained via `type: snowflake`), the
+  same one-dimension-many-tables shape as the bullet above, not a second
+  `object_type: dimension` pointing back at the first. Since the canvas
+  models one physical table per node, drawing this join generates SML that
+  looks plausible but the linked dimension is silently absent from the
+  deployed cube ("Dimension `X` not found" when queried) regardless of how
+  the join itself is compiled. Fixing this for real needs the same bigger
+  change as the bullet above (one hierarchy spanning multiple datasets),
+  not a fix to the deploy pipeline alone.
 - **Deploy's Git step targets GitHub specifically** (repo creation and push
   use the GitHub REST API and a personal access token); other Git hosts
   aren't wired up.
