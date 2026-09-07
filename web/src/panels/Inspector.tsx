@@ -254,10 +254,7 @@ export function Inspector() {
                   type="radio"
                   name="dimRole"
                   checked={(c.dimRole ?? 'none') === role}
-                  onChange={() => {
-                    setColumnDimRole(node.id, key, role)
-                    if (role !== 'none') seedNames({})
-                  }}
+                  onChange={() => setColumnDimRole(node.id, key, role)}
                 />
                 <div>
                   <div className="attr-card-label">{label}</div>

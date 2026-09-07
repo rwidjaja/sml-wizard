@@ -97,51 +97,88 @@ def build_catalog_xml(
     ref_dim_names = {r["toDimension"] for r in relationships if r["toDimension"]}
     fact_dataset_names = {r["fromDataset"] for r in relationships if r["fromDataset"]}
 
-    # -- keyed attributes (join targets) --
+    # -- keyed attributes: one per level_attribute *and* per secondary
+    # attribute, across every referenced dimension - not just the one level
+    # each fact relationship directly joins to. Confirmed against a real
+    # legacy project XML (atscale-xml-sml/enterprise_sales.xml) that every
+    # level in a multi-level hierarchy needs its own <level> element (only
+    # the join-target level was ever emitted here before, silently dropping
+    # every other level of the same hierarchy from the compiled cube), and a
+    # secondary attribute needs its own attribute-key/keyed-attribute pair
+    # referenced from its parent level via <keyed-attribute-ref> - a plain
+    # SML `secondary_attributes` entry alone never reached the compiled XML
+    # AtScale's deploy endpoint actually builds the cube from, so it was
+    # silently dropped for any model this wizard generated (confirmed: a
+    # hand-authored repo not deployed through this pipeline shows secondary
+    # attributes fine; one generated and deployed by this wizard didn't).
+    def _make_ka(dim_name: str, level_name: str, attr_name: str, la: dict[str, Any]) -> dict[str, Any]:
+        key_id = _gen_id(ns, f"{dim_name}.{level_name}.{attr_name}.key")
+        attr_id = _gen_id(ns, f"{dim_name}.{level_name}.{attr_name}.attr")
+        ds_id = _gen_id(ns, la.get("dataset") or "")
+        # SML lets an attribute's join/identity column (key_columns) differ
+        # from its display column (name_column) - e.g. join on the surrogate
+        # key `productkey` but show `englishproductname` (confirmed correct
+        # and required: sales-insights-postgres' hand-authored "Product
+        # Name" level does exactly this and queries fine). The legacy
+        # catalog XML has two separate elements for this - <key-ref> (what
+        # actually gets joined against) and <attribute-ref> (what's
+        # displayed) - so they need their own column, not one shared column
+        # defaulting to name_column: that previously made the compiled XML
+        # join the fact's int/bigint FK against a text display column
+        # whenever the two differed, producing a runtime "operator does not
+        # exist: bigint = text" from the SQL engine.
+        key_col = (la.get("key_columns") or [la["unique_name"]])[0]
+        attr_col = la.get("name_column") or key_col
+        return {
+            "laUniqueName": la["unique_name"],
+            "datasetName": la.get("dataset") or "",
+            "keyColumnName": key_col,
+            "attrColumnName": attr_col,
+            "label": la.get("label") or la["unique_name"],
+            "keyId": key_id,
+            "attrId": attr_id,
+            "datasetId": ds_id,
+        }
+
     keyed_attrs: list[dict[str, Any]] = []
+    # level unique_name -> its own ka (not a secondary's) - for the <level
+    # primary-attribute="..."> reference in the dimensions XML below.
+    own_ka_by_level: dict[str, dict[str, Any]] = {}
+    # rel["toLevel"] -> its ka, for resolving each fact relationship's join.
     keyed_attr_by_level: dict[str, dict[str, Any]] = {}
+    # level unique_name -> [ka, ...] for its secondary_attributes, so the
+    # hierarchy XML can emit <keyed-attribute-ref> under the right <level>.
+    secondary_kas_by_level: dict[str, list[dict[str, Any]]] = {}
+    # dataset name -> every ka backed by it, so a dataset that backs several
+    # levels/secondaries (the common case - one table, several attributes)
+    # gets a <key-ref>/<attribute-ref> for each instead of only the first.
+    kas_by_dataset: dict[str, list[dict[str, Any]]] = {}
 
     for dim_name in ref_dim_names:
         dim = dimensions_map.get(dim_name)
         if not dim:
             continue
         la_map = {la["unique_name"]: la for la in dim.get("level_attributes") or []}
-        for rel in relationships:
-            if rel["toDimension"] != dim_name:
-                continue
-            la = la_map.get(rel["toLevel"])
-            if not la:
-                continue
-            key_id = _gen_id(ns, f"{dim_name}.{rel['toLevel']}.key")
-            attr_id = _gen_id(ns, f"{dim_name}.{rel['toLevel']}.attr")
-            ds_id = _gen_id(ns, la.get("dataset") or "")
-            # SML lets a level's join/identity column (key_columns) differ
-            # from its display column (name_column) - e.g. join on the
-            # surrogate key `productkey` but show `englishproductname`
-            # (confirmed correct and required: sales-insights-postgres'
-            # hand-authored "Product Name" level does exactly this and
-            # queries fine). The legacy catalog XML has two separate
-            # elements for this - <key-ref> (what the fact's FK actually
-            # joins against) and <attribute-ref> (what's displayed) - so
-            # they need their own column, not one shared `columnName`
-            # defaulting to name_column: that previously made the compiled
-            # XML join the fact's int/bigint FK against a text display
-            # column whenever the two differed, producing a runtime
-            # "operator does not exist: bigint = text" from the SQL engine.
-            key_col = (la.get("key_columns") or [la["unique_name"]])[0]
-            attr_col = la.get("name_column") or key_col
-            ka = {
-                "laUniqueName": la["unique_name"],
-                "datasetName": la.get("dataset") or "",
-                "keyColumnName": key_col,
-                "attrColumnName": attr_col,
-                "label": la.get("label") or la["unique_name"],
-                "keyId": key_id,
-                "attrId": attr_id,
-                "datasetId": ds_id,
-            }
-            keyed_attrs.append(ka)
-            keyed_attr_by_level[rel["toLevel"]] = ka
+        for h in dim.get("hierarchies") or []:
+            for level in h.get("levels") or []:
+                level_name = level["unique_name"]
+                la = la_map.get(level_name)
+                if not la:
+                    continue
+                ka = _make_ka(dim_name, level_name, level_name, la)
+                keyed_attrs.append(ka)
+                own_ka_by_level[level_name] = ka
+                kas_by_dataset.setdefault(ka["datasetName"], []).append(ka)
+                for rel in relationships:
+                    if rel["toDimension"] == dim_name and rel["toLevel"] == level_name:
+                        keyed_attr_by_level[level_name] = ka
+
+                for sec in level.get("secondary_attributes") or []:
+                    sec_la = la_map.get(sec["unique_name"]) or sec
+                    sec_ka = _make_ka(dim_name, level_name, sec["unique_name"], sec_la)
+                    keyed_attrs.append(sec_ka)
+                    kas_by_dataset.setdefault(sec_ka["datasetName"], []).append(sec_ka)
+                    secondary_kas_by_level.setdefault(level_name, []).append(sec_ka)
 
     # -- fact datasets with metric columns --
     fact_datasets: dict[str, dict[str, Any]] = {}
@@ -170,7 +207,10 @@ def build_catalog_xml(
             {"unique_name": m["unique_name"], "column": m.get("column"), "attrId": _gen_id(ns, f"{model_cube_name}.{m['unique_name']}")}
         )
 
-    # -- dimension datasets --
+    # -- dimension datasets: one <data-set> per physical dataset, but a
+    # <key-ref>/<attribute-ref> pair for *every* ka backed by it (a dataset
+    # commonly backs several levels/secondaries at once - grouping by only
+    # the first ka silently dropped every other attribute on that table).
     dim_datasets: list[dict[str, Any]] = []
     seen_dim_ds: set[str] = set()
     for ka in keyed_attrs:
@@ -180,9 +220,11 @@ def build_catalog_xml(
         ds = datasets_map.get(ka["datasetName"])
         if not ds:
             continue
-        dim_datasets.append({"datasetName": ka["datasetName"], "ds": ds, "dsId": ka["datasetId"], "ka": ka})
+        dim_datasets.append({"datasetName": ka["datasetName"], "ds": ds, "dsId": ka["datasetId"]})
 
-    # -- dimensions XML --
+    # -- dimensions XML: every level of every referenced hierarchy (not just
+    # the one a fact relationship directly joins to), each with its own
+    # <keyed-attribute-ref> for any secondary attributes attached to it. --
     dimensions_xml_parts = []
     for dim_name in ref_dim_names:
         dim = dimensions_map.get(dim_name)
@@ -191,28 +233,44 @@ def build_catalog_xml(
         dim_id = _gen_id(ns, dim_name)
         hier_parts = []
         for h in dim.get("hierarchies") or []:
+            level_parts = []
             for level in h.get("levels") or []:
-                ka = keyed_attr_by_level.get(level["unique_name"])
+                level_name = level["unique_name"]
+                ka = own_ka_by_level.get(level_name)
                 if not ka:
                     continue
-                hier_id = _gen_id(ns, f"{dim_name}.{h['unique_name']}")
-                hier_parts.append(
+                sec_refs = "".join(
                     f"""
+          <keyed-attribute-ref attribute-id="{sec_ka['attrId']}">
+            <properties>
+              <multiplicity></multiplicity>
+            </properties>
+          </keyed-attribute-ref>"""
+                    for sec_ka in secondary_kas_by_level.get(level_name, [])
+                )
+                level_parts.append(
+                    f"""
+        <level primary-attribute="{ka['attrId']}">
+          <properties>
+            <unique-in-parent>false</unique-in-parent>
+            <visible>true</visible>
+          </properties>{sec_refs}
+        </level>"""
+                )
+            if not level_parts:
+                continue
+            hier_id = _gen_id(ns, f"{dim_name}.{h['unique_name']}")
+            hier_parts.append(
+                f"""
       <hierarchy id="{hier_id}" name="{_esc(h['unique_name'])}">
         <properties>
           <caption>{_esc(h.get('label') or h['unique_name'])}</caption>
           <visible>true</visible>
           <filter-empty>Always</filter-empty>
           <default-member><all-member></all-member></default-member>
-        </properties>
-        <level primary-attribute="{ka['attrId']}">
-          <properties>
-            <unique-in-parent>false</unique-in-parent>
-            <visible>true</visible>
-          </properties>
-        </level>
+        </properties>{"".join(level_parts)}
       </hierarchy>"""
-                )
+            )
         hierarchies_xml = "".join(hier_parts)
         if not hierarchies_xml:
             continue
@@ -236,9 +294,19 @@ def build_catalog_xml(
 
     dim_datasets_xml_parts = []
     for entry in dim_datasets:
-        ds_name, ds, ds_id, ka = entry["datasetName"], entry["ds"], entry["dsId"], entry["ka"]
+        ds_name, ds, ds_id = entry["datasetName"], entry["ds"], entry["dsId"]
         table_name = ds.get("table") or ds_name.replace(".dataset", "")
         conn_id = as_connection_id(ds.get("connection_id"))
+        refs = "".join(
+            f"""
+      <key-ref id="{ka['keyId']}" unique="false" complete="true">
+        <column>{_esc(ka['keyColumnName'])}</column>
+      </key-ref>
+      <attribute-ref id="{ka['attrId']}" complete="true">
+        <column>{_esc(ka['attrColumnName'])}</column>
+      </attribute-ref>"""
+            for ka in kas_by_dataset.get(ds_name, [])
+        )
         dim_datasets_xml_parts.append(
             f"""
   <data-set id="{ds_id}" name="{_esc(ds_name)}">
@@ -252,13 +320,7 @@ def build_catalog_xml(
       </table>
       <immutable>false</immutable>{columns_xml(ds)}
     </physical>
-    <logical>
-      <key-ref id="{ka['keyId']}" unique="false" complete="true">
-        <column>{_esc(ka['keyColumnName'])}</column>
-      </key-ref>
-      <attribute-ref id="{ka['attrId']}" complete="true">
-        <column>{_esc(ka['attrColumnName'])}</column>
-      </attribute-ref>
+    <logical>{refs}
     </logical>
   </data-set>"""
         )
@@ -308,7 +370,14 @@ def build_catalog_xml(
             )
     measure_attrs_xml = "".join(measure_attrs_parts)
 
-    join_ka = keyed_attrs[0] if keyed_attrs else None
+    # keyed_attrs now also holds every non-join level and secondary
+    # attribute (see above) - keyed_attrs[0] would no longer reliably be an
+    # actual join target. keyed_attr_by_level is still scoped to only real
+    # relationship targets, preserving the original "assume a single join
+    # key" simplification's behavior (ps-utils' own docstring already flags
+    # this as fine only for one join per fact-dimension pair - unchanged
+    # here, not what this fix is about).
+    join_ka = next(iter(keyed_attr_by_level.values()), None)
     cube_ds_refs_parts = []
     for fde in fact_datasets.values():
         key_ref = (

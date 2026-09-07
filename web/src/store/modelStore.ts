@@ -244,12 +244,19 @@ function layerNodes(nodes: Node[], joins: Join[]): Node[][] {
   return layers.filter(Boolean)
 }
 
+/** Shared with Inspector.tsx's own copy (seeding a Display name from a raw
+ *  column/table name) - kept in sync by hand since the store can't import
+ *  from a panel component. */
+function titleCase(s: string): string {
+  return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
 /** Auto-seeded names for a role, derived from the table name (strip dim_/fact_/fct_
  *  prefix, title-case). Shared by addNode's initial role guess and setNodeRole's
  *  manual role change so both paths seed dimName/hierName/factName consistently. */
 function seededNamesFor(table: string, role: Role) {
   const stem = table.replace(/^(dim_|fact_|fct_)/i, '')
-  const titled = stem.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  const titled = titleCase(stem)
   return {
     dimName: role === 'dimension' ? `${titled} Dimension` : undefined,
     hierName: role === 'dimension' ? `${titled} Hierarchy` : undefined,
@@ -362,7 +369,16 @@ export const useModelStore = create<ModelState>((set, get) => ({
         const currentLevels = levelsOf(s, nodeId)
         levelOrder = currentLevels.length ? currentLevels[currentLevels.length - 1].levelOrder + 1 : 0
       }
-      return { cfg: { ...s.cfg, [key]: { ...existing, dimRole, levelOrder } } }
+      // Seed Display name/Query name the same way a manual "mark as level"
+      // click already does (Inspector's seedNames) - needed here too now
+      // that addJoin can set dimRole:'level' on its own (the join's key
+      // column becoming L1 automatically), which bypassed that seeding and
+      // left Display/Query name blank until the user opened the column and
+      // touched something.
+      const column = key.slice(nodeId.length + 2)
+      const display = dimRole === 'none' ? existing.display : existing.display || titleCase(column)
+      const query = dimRole === 'none' ? existing.query : existing.query || column
+      return { cfg: { ...s.cfg, [key]: { ...existing, dimRole, levelOrder, display, query } } }
     }),
 
   setLevelOrder: (nodeId, key, direction) =>
